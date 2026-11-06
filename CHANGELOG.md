@@ -98,6 +98,8 @@ my best to rapidly address anything!
 - `-j`/`--num-jobs` now defaults to 4 (was 1)
 - default output directory is now `gtotree-output`
 - `-L`/`--lineage-ranks` defaults to all primary ranks (`domain,phylum,class,order,family,genus,species`)
+- `-T`/`--tree-program` now defaults to VeryFastTree (was FastTreeMP)
+- by default, muscle uses it's super5 alignment now, pass `-X` to tell GToTree to use the standard muscle alignment algorithm
 
 
 #### Filtering

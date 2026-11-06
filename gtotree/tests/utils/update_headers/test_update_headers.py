@@ -228,6 +228,24 @@ class TestBuildingTheNewMapping:
         new_labels = run_lib.new_labels_for(run_data)
         assert new_labels["GCF_000005845.2"] == "GCF_000005845.2"
 
+    def test_a_previous_suffix_only_mapping_is_cleared_too(self, tmp_path, relabeled_run):
+        """
+        A finished run whose `-m` had suffix-only lines carries a suffix_dict. Left in
+        place, it made check_mapping_file skip the NEW `-m` file entirely and then
+        re-applied the old suffixes.
+        """
+        run_data = run_lib.load_completed_run(relabeled_run)
+        run_data.suffix_dict = {"GCF_000005845.2": "OLDSFX"}
+
+        mapping = tmp_path / "new-names.tsv"
+        mapping.write_text("GCA_000009065.1\tSakai\n")
+        args = _args(relabeled_run, "unused", mapping_file=str(mapping))
+        _args_out, run_data = cli.build_new_mapping_dict(args, run_data)
+
+        new_labels = run_lib.new_labels_for(run_data)
+        assert new_labels["GCA_000009065.1"] == "Sakai"
+        assert "OLDSFX" not in new_labels["GCF_000005845.2"]
+
 
 ################################################################################
 # outputs
@@ -403,6 +421,15 @@ class TestArgChecks:
         """
         args = _args(tmp_path, str(tmp_path) + "/")
         with pytest.raises(UpdateHeadersError, match="never writes into the run"):
+            cli.check_args(args)
+
+
+    def test_an_output_dir_containing_the_run_is_refused(self, tmp_path):
+        # with `-F`, clearing such an `-o` deleted the run being re-labeled
+        run = tmp_path / "parent" / "run"
+        run.mkdir(parents=True)
+        args = _args(run, tmp_path / "parent")
+        with pytest.raises(UpdateHeadersError, match="same as, or contains"):
             cli.check_args(args)
 
     def test_an_existing_output_dir_is_refused_without_force(self, tmp_path,

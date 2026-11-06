@@ -14,7 +14,10 @@ class CitationsInfo:
     )
     muscle = "Edgar RC. MUSCLE v5 enables improved estimates of phylogenetic tree confidence by ensemble bootstrapping. bioRxiv. 2021.06.20.449169. doi.org/10.1101/2021.06.20.449169\n\n"
     trimal = "Gutierrez SC. et al. TrimAl: a Tool for automatic alignment trimming. Bioinformatics. 2009; 25, 1972-1973. doi.org/10.1093/bioinformatics/btp348\n\n"
-    prodigal = "Hyatt, D. et al. Gene and translation initiation site prediction in metagenomic sequences. Bioinformatics. 2010; 28, 2223-2230. doi.org/10.1186/1471-2105-11-119\n\n"
+    prodigal = (
+        "Hyatt, D. et al. Prodigal: prokaryotic gene recognition and translation initiation site identification. BMC Bioinformatics. 2010; 11, 119. doi.org/10.1186/1471-2105-11-119\n"
+        "Larralde, M. Pyrodigal: Python bindings and interface to Prodigal, an efficient method for gene prediction in prokaryotes. J. Open Source Softw. 2022; 7(72), 4296. doi.org/10.21105/joss.04296\n\n"
+    )
     gtdb = "Parks DH et al. A complete domain-to-species taxonomy for Bacteria and Archaea. Nat. Biotech. 2020. doi.org/10.1038/s41587-020-0501-8\n\n"
     fasttree = "Price MN et al. FastTree2 - approximately maximum-likelihood trees for large alignments. PLoS One. 2010; 5. doi.org/10.1371/journal.pone.0009490\n\n"
     veryfasttree = "Pineiro C et al. VeryFastTree: speeding up the estimation of phylogenies for large alignments through parallelization and vectorization strategies. Bioinformatics. 2020. doi.org/10.1093/bioinformatics/btaa582\n\n"
@@ -48,7 +51,7 @@ def generate_citations_info(run_data):
         outfile.write(citations_info.trimal)
 
         if run_data.tools_used.prodigal_used:
-            outfile.write(f"Prodigal {get_prodigal_version()}\n")
+            outfile.write(f"Prodigal (via pyrodigal {get_pyrodigal_version()})\n")
             outfile.write(citations_info.prodigal)
 
         if run_data.tools_used.gtdb_used:
@@ -126,9 +129,11 @@ def get_trimal_version():
     ver = _extract_version(_tool_output(["trimal", "--version"]), marker="trim")
     return f"v{ver}" if ver else ""
 
-def get_prodigal_version():
-    ver = _extract_version(_tool_output(["prodigal", "-v"]), marker="prodigal")
-    return f"v{ver}" if ver else ""
+def get_pyrodigal_version():
+    try:
+        return f"v{version('pyrodigal')}"
+    except Exception:
+        return ""
 
 def get_fasttree_version():
     return _extract_version(_tool_output(["FastTree", "-expert"]))

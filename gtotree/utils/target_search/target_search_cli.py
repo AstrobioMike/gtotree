@@ -239,32 +239,36 @@ def build_parser(parent_subparsers=None):
 
     genomes.add_argument(
         "-a", "--ncbi-accessions",
-        metavar="<FILE>",
-        help="A single-column file of NCBI accessions to search.",
-        action="store",
+        metavar="<STR>",
+        nargs="+",
+        help=("NCBI accessions to search, given directly (e.g., GCF_000005845.2) and/or "
+              "as a single-column file listing them."),
     )
 
     genomes.add_argument(
         "-f", "--fasta-files",
         metavar="<FILE>",
-        help=("A single-column file listing nucleotide fasta files to search; genes "
-              "will be called with prodigal."),
-        action="store",
+        nargs="+",
+        help=("Nucleotide fasta files to search (genes will be called), given directly, "
+              "as a quoted pattern (e.g., \"*.fasta\"), "
+              "and/or as a single-column file listing their paths."),
     )
 
     genomes.add_argument(
         "-A", "--amino-acid-files",
         metavar="<FILE>",
-        help=("A single-column file listing amino-acid fasta files to search; each "
-              "should hold the proteins for one genome."),
-        action="store",
+        nargs="+",
+        help=("Amino-acid fasta files to search, each holding the proteins of one "
+              "genome, given directly as a quoted pattern, and/or as a single-column "
+              "file listing their paths."),
     )
 
     genomes.add_argument(
         "-g", "--genbank-files",
         metavar="<FILE>",
-        help="A single-column file listing GenBank files to search.",
-        action="store",
+        nargs="+",
+        help=("GenBank files to search, given directly as a quoted pattern, and/or as "
+              "a single-column file listing their paths."),
     )
 
     optional.add_argument(

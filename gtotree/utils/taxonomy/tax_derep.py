@@ -6,10 +6,10 @@ assets
 import pyarrow as pa # type: ignore
 import pyarrow.compute as pc # type: ignore
 
-from gtotree.utils.taxonomy.tax_ranks import (RANKS, NA, REFERENCE_VALUE, accession_core,
+from gtotree.utils.taxonomy.tax_ranks import (RANKS, NA, REFERENCE_VALUE,
                                               rank_index, validate_derep_rank)
 from gtotree.utils.taxonomy.tax_select import (SOURCES, select, resolve_taxon,
-                                               live_accession_cores,
+                                               filter_table_by_liveness,
                                                diagnose_empty_pool)
 from gtotree.utils.taxonomy.tax_targets import (domains_in_asset,
                                                 unassigned_domain_summary)
@@ -52,7 +52,13 @@ DEREP_STEPS = 2
 # is always unambiguous.
 DEREP_STEPS_BY_DOMAIN = {"Eukaryota": 1}
 from gtotree.utils.taxonomy.exclusion_list import (filter_rows_by_exclusion,
+                                                    filter_table_by_exclusion,
                                                     exclusion_warning)
+
+#: rows materialized as Python dicts at a time while dereplicating. The pool itself
+#: stays columnar, so peak memory scales with this rather than with the pool (an
+#: NCBI `-w Bacteria` pool is ~4M rows, which as one list of dicts was ~4 GB)
+DEREP_BATCH_ROWS = 65536
 
 
 def _derive_default_derep(target_rank, steps=DEREP_STEPS):
@@ -424,55 +430,78 @@ def derep(path, source, wanted_rank, wanted_taxon, derep_rank,
                  assembly_levels=assembly_levels, domain=domain)
     attrition.n_candidates = tab.num_rows
 
+    # liveness and the exclusion list are plain accession filters, so they run on the
+    # columnar table; only the survivors are ever turned into Python rows, a batch at
+    # a time (see DEREP_BATCH_ROWS). Order is preserved throughout, so ties still go
+    # to the first-seen genome exactly as before
     if screen_against:
-        live = live_accession_cores(screen_against)
-        before = tab.num_rows
-        rows = [r for r in tab.to_pylist()
-                if r.get(spec.acc_col) and accession_core(r[spec.acc_col]) in live]
-        n_dead = before - len(rows)
+        tab, n_dead = filter_table_by_liveness(tab, spec.acc_col, screen_against)
         if n_dead:
             warnings.append(
                 f"{n_dead:,} candidate genome(s) are no longer available at NCBI "
                 f"(suppressed/removed) and were excluded before selection.")
         attrition.n_dead = n_dead
-        tab = None
-    else:
-        rows = tab.to_pylist()
-    attrition.n_after_liveness = len(rows)
+    attrition.n_after_liveness = tab.num_rows
 
-    rows, n_excluded = filter_rows_by_exclusion(rows, spec.acc_col, exclude_cores)
+    tab, n_excluded = filter_table_by_exclusion(tab, spec.acc_col, exclude_cores)
     excluded_note = exclusion_warning(n_excluded)
     if excluded_note:
         warnings.append(excluded_note)
     attrition.n_excluded = n_excluded
-    attrition.n_after_exclusion = len(rows)
+    attrition.n_after_exclusion = tab.num_rows
 
-    rows, n_below, n_missing = apply_quality_floor(
-        rows, spec, min_completeness, max_contamination)
+    keyfn = resolve_picker(pick)
+
+    if keyfn is quality_key:
+        # the default picker, ranked on whole columns; gives exactly the Python loop
+        # below's answer (that loop stays for "first" and custom pickers)
+        best, n_na_group, n_below, n_missing, n_after_floor = _best_by_quality_columnar(
+            tab, spec, derep_rank, min_completeness, max_contamination)
+        return _finish_derep(best, n_na_group, n_below, n_missing, n_after_floor,
+                             spec, wanted_rank, wanted_taxon, reps_only,
+                             min_completeness, max_contamination, warnings, attrition)
+
+    best = {}
+    best_key = {}
+    n_na_group = 0
+    n_below = n_missing = n_after_floor = 0
+    for batch in tab.to_batches(max_chunksize=DEREP_BATCH_ROWS):
+        rows, b, m = apply_quality_floor(
+            batch.to_pylist(), spec, min_completeness, max_contamination)
+        n_below += b
+        n_missing += m
+        n_after_floor += len(rows)
+        for row in rows:
+            group = row.get(derep_rank)
+            if not group or group == NA:
+                n_na_group += 1
+                continue
+            k = keyfn(row, spec)
+            # the incumbent's key is kept rather than recomputed on every comparison
+            if group not in best_key or k < best_key[group]:
+                best[group] = row[spec.acc_col]
+                best_key[group] = k
+
+    return _finish_derep(best, n_na_group, n_below, n_missing, n_after_floor,
+                         spec, wanted_rank, wanted_taxon, reps_only,
+                         min_completeness, max_contamination, warnings, attrition)
+
+
+def _finish_derep(best, n_na_group, n_below, n_missing, n_after_floor, spec,
+                  wanted_rank, wanted_taxon, reps_only, min_completeness,
+                  max_contamination, warnings, attrition):
+    """The shared tail of derep(): `best` maps each group to its picked accession"""
     warnings.extend(_quality_floor_warnings(
         n_below, n_missing, min_completeness, max_contamination))
     attrition.n_below_floor = n_below
     attrition.n_missing_quality = n_missing
-    attrition.n_after_floor = len(rows)
+    attrition.n_after_floor = n_after_floor
 
-    if not rows:
+    if not n_after_floor:
         warnings.append(
             f"{NO_GENOMES_WARNING_PREFIX}{wanted_rank} '{wanted_taxon}'"
             + (" in the representatives pool." if reps_only else "."))
         return [], 0, warnings, attrition
-
-    keyfn = resolve_picker(pick)
-
-    best = {}
-    n_na_group = 0
-    for row in rows:
-        group = row.get(derep_rank)
-        if not group or group == NA:
-            n_na_group += 1
-            continue
-        k = keyfn(row, spec)
-        if group not in best or k < keyfn(best[group], spec):
-            best[group] = row
 
     # n_na_group is NOT warned about per-pull on purpose. Broad targets routinely have
     # some genomes unclassified at the derep rank and saying so every time is noise.
@@ -482,8 +511,140 @@ def derep(path, source, wanted_rank, wanted_taxon, derep_rank,
     attrition.n_unassigned_group = n_na_group
     attrition.n_groups = len(best)
 
-    accs = [best[g][spec.acc_col] for g in sorted(best)]
+    accs = [best[g] for g in sorted(best)]
     return accs, len(best), warnings, attrition
+
+
+_NA_NUMBERS = pa.array(["", NA, "na"])
+
+
+def _num_column(tab, col):
+    """
+    A column as float64 with nulls where _num() gives None. The Parquet assets store
+    numbers as strings, so this is a straight cast; anything Arrow won't cast falls
+    back to _num() itself, once per distinct value
+    """
+    if not col or col not in tab.column_names:
+        return pa.nulls(tab.num_rows, pa.float64())
+    arr = tab.column(col).combine_chunks()
+    if pa.types.is_floating(arr.type) or pa.types.is_integer(arr.type):
+        return arr.cast(pa.float64())
+    arr = arr.cast(pa.string())
+    arr = pc.if_else(pc.is_in(arr, value_set=_NA_NUMBERS), None, arr)
+    try:
+        return arr.cast(pa.float64())
+    except pa.ArrowInvalid:
+        enc = arr.dictionary_encode()
+        parsed = pa.array([_num(v) for v in enc.dictionary.to_pylist()], pa.float64())
+        return parsed.take(enc.indices)
+
+
+def _normalized_strings(tab, col):
+    """lower(strip(str(value or ""))) for every row, as a Python list of distinct
+    values plus per-row indices into it"""
+    arr = tab.column(col).combine_chunks().cast(pa.string()).fill_null("")
+    enc = arr.dictionary_encode()
+    norm = [v.strip().lower() for v in enc.dictionary.to_pylist()]
+    return norm, enc.indices.to_numpy(zero_copy_only=False)
+
+
+def _best_by_quality_columnar(tab, spec, derep_rank, min_completeness,
+                              max_contamination):
+    """
+    derep()'s best-genome-per-group pick under quality_key, on whole columns: the
+    quality floor and every sort key are computed as arrays, then one stable lexsort
+    orders the rows by (group, key) and the first row of each group wins. Stable, so
+    rows tying on the whole key fall to the first-seen one, as in the Python loop.
+
+    Returns (best {group: accession}, n_na_group, n_below, n_missing, n_after_floor).
+    """
+    import numpy as np  # type: ignore
+
+    n = tab.num_rows
+    comp_col, cont_col = spec.quality_cols
+    comp = _num_column(tab, comp_col).to_numpy(zero_copy_only=False)
+    cont = _num_column(tab, cont_col).to_numpy(zero_copy_only=False)
+    comp_missing = np.isnan(comp) if n else np.zeros(0, bool)
+    cont_missing = np.isnan(cont) if n else np.zeros(0, bool)
+
+    # quality floor (apply_quality_floor): missing values first, then the bar
+    keep = np.ones(n, bool)
+    missing = np.zeros(n, bool)
+    if min_completeness is not None:
+        missing |= comp_missing
+    if max_contamination is not None:
+        missing |= cont_missing
+    keep &= ~missing
+    below = np.zeros(n, bool)
+    with np.errstate(invalid="ignore"):
+        if min_completeness is not None:
+            below |= keep & (comp < min_completeness)
+        if max_contamination is not None:
+            below |= keep & ~below & (cont > max_contamination)
+    keep &= ~below
+    n_missing, n_below = int(missing.sum()), int(below.sum())
+    n_after_floor = int(keep.sum())
+
+    groups = tab.column(derep_rank).combine_chunks().cast(pa.string())
+    no_group = pc.or_(pc.is_null(groups), pc.is_in(groups, value_set=pa.array(["", NA])))
+    no_group = no_group.to_numpy(zero_copy_only=False)
+    n_na_group = int((keep & no_group).sum())
+    keep &= ~no_group
+
+    rows = np.flatnonzero(keep)
+    if not len(rows):
+        return {}, n_na_group, n_below, n_missing, n_after_floor
+
+    has_checkm = ~comp_missing
+    ref_values, ref_idx = _normalized_strings(tab, spec.ref_col)
+    is_ref = np.array([v == REFERENCE_VALUE for v in ref_values], bool)[ref_idx]
+    with np.errstate(invalid="ignore"):
+        ref_ok = ~has_checkm | ((comp >= REF_MIN_COMPLETENESS)
+                                & (cont_missing | (cont <= REF_MAX_CONTAMINATION)))
+    is_ref &= ref_ok
+
+    if spec.level_col:
+        lvl_values, lvl_idx = _normalized_strings(tab, spec.level_col)
+        lvl = np.array([ASSEMBLY_LEVEL_ORDER.get(v, 0) for v in lvl_values],
+                       float)[lvl_idx]
+    else:
+        lvl = np.zeros(n)
+
+    if spec.contig_col and spec.size_col:
+        contigs = _num_column(tab, spec.contig_col).to_numpy(zero_copy_only=False)
+        size = _num_column(tab, spec.size_col).to_numpy(zero_copy_only=False)
+        if spec.size_fallback_col:
+            fallback = _num_column(tab, spec.size_fallback_col).to_numpy(
+                zero_copy_only=False)
+            size = np.where(np.isnan(size), fallback, size)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            ok = (contigs > 0) & (size > 0)
+            mean_contig = np.where(ok, size / np.where(ok, contigs, 1.0), 0.0)
+    else:
+        mean_contig = np.zeros(n)
+
+    accs = tab.column(spec.acc_col).combine_chunks().cast(pa.string()).fill_null("")
+    acc_rank = pc.rank(accs, sort_keys="ascending", tiebreaker="dense").to_numpy()
+    group_rank = pc.rank(groups.fill_null(""), sort_keys="ascending",
+                         tiebreaker="dense").to_numpy()
+
+    k_ref = np.where(is_ref, 0, 1)
+    k_checkm = np.where(has_checkm, 0, 1)
+    k_comp = -np.where(has_checkm, comp, 0.0)
+    k_cont = np.where(~cont_missing, cont,
+                      np.where(has_checkm, MISSING_CONTAMINATION, 0.0))
+    keys = [acc_rank, -mean_contig, -lvl, k_cont, k_comp, k_checkm, k_ref, group_rank]
+    order = rows[np.lexsort([k[rows] for k in keys])]
+
+    sorted_groups = group_rank[order]
+    first = np.ones(len(order), bool)
+    first[1:] = sorted_groups[1:] != sorted_groups[:-1]
+    winners = order[first]
+
+    group_names = groups.take(pa.array(winners)).to_pylist()
+    acc_names = tab.column(spec.acc_col).take(pa.array(winners)).to_pylist()
+    best = dict(zip(group_names, acc_names))
+    return best, n_na_group, n_below, n_missing, n_after_floor
 
 
 #: prefix of the terse "nothing here" warning derep() and the derep-off branch emit.
@@ -734,20 +895,17 @@ def select_ref_genomes(path, source, taxon, target_rank=None, derep_rank="auto",
                      reps_only=reps_only, columns=cols,
                      accession_prefixes=accession_prefixes,
                      assembly_levels=assembly_levels, domain=resolved_domain)
-        rows = tab.to_pylist()
-        attrition.n_candidates = len(rows)
+        attrition.n_candidates = tab.num_rows
 
         if screen_against:
-            live = live_accession_cores(screen_against)
-            before = len(rows)
-            rows = [r for r in rows
-                    if r.get(spec.acc_col) and accession_core(r[spec.acc_col]) in live]
-            n_dead = before - len(rows)
+            # on the columnar table, before any rows are materialized
+            tab, n_dead = filter_table_by_liveness(tab, spec.acc_col, screen_against)
             if n_dead:
                 warnings.append(
                     f"{n_dead:,} candidate genome(s) are no longer available at NCBI "
                     f"(suppressed/removed) and were excluded.")
             attrition.n_dead = n_dead
+        rows = tab.to_pylist()
         attrition.n_after_liveness = len(rows)
 
         rows, n_excluded = filter_rows_by_exclusion(rows, spec.acc_col,

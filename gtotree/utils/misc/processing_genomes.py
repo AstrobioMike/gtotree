@@ -6,17 +6,18 @@ amino-acid FASTA (plus nucleotides in nucleotide mode).
 import pandas as pd # type: ignore
 import urllib.request
 import urllib.error
+import http.client
+from gtotree.utils.misc.gene_calling import call_genes, GenomeTooShort
 import gzip
 import shutil
 import os
 import time
 import random
-import subprocess
 import threading
 from gtotree.utils.misc.seqs import (filter_and_rename_fasta,
                                 extract_filter_and_rename_cds_amino_acids_from_gb,
                                 extract_fasta_from_gb)
-from gtotree.utils.misc.general import (gunzip_if_needed,
+from gtotree.utils.misc.general import (is_gzipped,
                                    remove_file_if_exists)
 from gtotree.utils.misc.stages import GenomeRemovalStage
 
@@ -242,7 +243,10 @@ def download_and_unzip_accession(link, filepath, max_retries=NCBI_DOWNLOAD_MAX_R
                 raise AssemblyDownloadFailed(f"HTTP {e.code} for {link}") from e
             last_err = e
             throttled = _is_throttle(e)
-        except (urllib.error.URLError, OSError, EOFError, gzip.BadGzipFile) as e:
+        except (urllib.error.URLError, OSError, EOFError, gzip.BadGzipFile,
+                http.client.HTTPException) as e:
+            # HTTPException: IncompleteRead (a chunked body cut short) is not an
+            # OSError, and escaping here would skip the retries entirely
             cleanup_partials()
             last_err = e
             # a connection reset or corrupt gzip carries no server instruction,
@@ -388,8 +392,9 @@ def _process_one_genbank_file(gb, run_data):
     mutation happens on the main thread in _apply_genbank_status.
     """
     try:
-        path, was_gzipped = gunzip_if_needed(gb.full_path,
-                                             out_dir=run_data.genbank_processing_dir)
+        # read where it sits, gzipped or not (no decompressed scratch copy)
+        path = gb.full_path
+        was_gzipped = is_gzipped(path)
 
         prodigal_used = False
         final_nt_path = None
@@ -407,9 +412,6 @@ def _process_one_genbank_file(gb, run_data):
                 done, final_AA_path, num_genes, final_nt_path = filter_and_rename_fasta(gb.id, run_data, run_data.genbank_processing_dir)
             else:
                 prodigal_used = False
-
-        if was_gzipped:
-            os.remove(path)
 
         return {
             "done": bool(done),
@@ -462,13 +464,10 @@ def _process_one_fasta_file(fasta, run_data):
     dict. GenomeData mutation happens on the main thread in _apply_fasta_status.
     """
     try:
-        path, was_gzipped = gunzip_if_needed(fasta.full_path,
-                                             out_dir=run_data.fasta_processing_dir)
+        path = fasta.full_path
+        was_gzipped = is_gzipped(path)
 
         done, error = run_prodigal(fasta.id, run_data, path, "fasta")
-
-        if was_gzipped:
-            os.remove(path)
 
         if done:
             done, final_AA_path, num_genes, final_nt_path = filter_and_rename_fasta(fasta.id, run_data, run_data.fasta_processing_dir)
@@ -527,13 +526,10 @@ def _process_one_amino_acid_file(AA, run_data):
     mutation happens on the main thread in _apply_amino_acid_status.
     """
     try:
-        path, was_gzipped = gunzip_if_needed(AA.full_path,
-                                             out_dir=run_data.AA_processing_dir)
+        path = AA.full_path
+        was_gzipped = is_gzipped(path)
 
         done, final_AA_path, num_genes, final_nt_path = filter_and_rename_fasta(AA.id, run_data, path, full_path=True)
-
-        if was_gzipped:
-            os.remove(path)
 
         return {
             "done": bool(done),
@@ -572,13 +568,12 @@ def _apply_amino_acid_status(AA, status, run_data):
                         GenomeRemovalStage.AMINO_ACID_PREP)
 
 
-PRODIGAL_TOO_SHORT_EXIT = 10
 PRODIGAL_TOO_SHORT_REASON = ("prodigal failed: genome too short for gene-calling")
 
 
 def run_prodigal(id, run_data, full_inpath = None, group = None):
     """
-    Call genes with prodigal and strip the trailing '*' stop characters
+    Call genes (prodigal's algorithm, via pyrodigal) for one genome
 
     Returns `(done, error)`. `error` is None on success, otherwise a short human-readable
     reason the caller can carry back to the main thread and hand to `mark_removed`, so it
@@ -601,43 +596,19 @@ def run_prodigal(id, run_data, full_inpath = None, group = None):
         out_AA_path = f"{run_data.fasta_processing_dir}/{id}_protein.faa"
         out_nt_path = f"{run_data.fasta_processing_dir}/{id}_cds.fasta"
 
-    tmp_AA = f"{out_AA_path}.tmp"
-    tmp_nt = f"{out_nt_path}.tmp"
-
-    prodigal_cmd = [
-        "prodigal", "-c", "-q",
-        "-i", in_path,
-        "-a", tmp_AA,
-        "-d", tmp_nt,
-    ]
-
     done = False
     error = None
     try:
-        subprocess.run(prodigal_cmd,
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.PIPE,
-                       check=True)
-
-        _strip_stop_chars(tmp_AA, out_AA_path)
-        if run_data.nucleotide_mode:
-            _strip_stop_chars(tmp_nt, out_nt_path)
+        # in-process via pyrodigal: the same calls as the prodigal binary (see
+        # gene_calling), written atomically and already free of '*' stop characters
+        call_genes(in_path, out_AA_path,
+                   out_nt_path if run_data.nucleotide_mode else None)
         done = True
-
-    except subprocess.CalledProcessError as e:
-        if e.returncode == PRODIGAL_TOO_SHORT_EXIT:
-            error = PRODIGAL_TOO_SHORT_REASON
-        else:
-            stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
-            error = f"prodigal failed (exit {e.returncode})"
-            if stderr.strip():
-                error += f": {_condense(stderr)}"
-    except (OSError, ValueError) as e:
-        # binary missing, unreadable input, or a failed strip/replace
-        error = f"prodigal could not be run: {type(e).__name__}: {e}"
-    finally:
-        for tmp in (tmp_AA, tmp_nt):
-            remove_file_if_exists(tmp)
+    except GenomeTooShort:
+        error = PRODIGAL_TOO_SHORT_REASON
+    except Exception as e:
+        # unreadable input, pyrodigal missing, a failed write
+        error = f"gene calling failed: {type(e).__name__}: {_condense(str(e))}"
 
     # if the output file doesn't exist or is empty, mark as not done
     if not os.path.exists(out_AA_path):
@@ -658,23 +629,3 @@ def _condense(text, limit=200):
     """
     flat = " ".join(text.split())
     return flat if len(flat) <= limit else flat[:limit - 3] + "..."
-
-
-def _strip_stop_chars(src, dest):
-    """
-    Copy `src` to `dest` with '*' characters removed, atomically
-    """
-    tmp = f"{dest}.part"
-    try:
-        with open(src, "r") as in_f, open(tmp, "w") as out_f:
-            while True:
-                chunk = in_f.read(1024 * 256)
-                if not chunk:
-                    break
-                out_f.write(chunk.replace("*", ""))
-            out_f.flush()
-            os.fsync(out_f.fileno())
-        os.replace(tmp, dest)
-    except BaseException:
-        remove_file_if_exists(tmp)
-        raise

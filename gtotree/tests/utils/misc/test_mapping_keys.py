@@ -28,6 +28,12 @@ class TestMappingKeyLookup:
         lookup = build_mapping_key_lookup(_run_data())
         assert lookup["mock-1"] == "mock-1"
 
+    def test_accepts_the_filename_basename(self):
+        # the `-m` help offers the input filename basename, but only the full path
+        # as listed, or the id, used to resolve
+        lookup = build_mapping_key_lookup(_run_data())
+        assert lookup["mock-1.faa"] == "mock-1"
+
     def test_an_accession_is_its_own_id(self):
         lookup = build_mapping_key_lookup(_run_data())
         assert lookup["GCF_000000001.1"] == "GCF_000000001.1"
@@ -168,3 +174,19 @@ def test_apply_suffixes_is_a_noop_without_suffix_entries():
     rd = _RD({"GCA_1": "Whatever"}, {})
     apply_suffixes_to_mapping_dict(rd)
     assert rd.mapping_dict == {"GCA_1": "Whatever"}
+
+
+def test_a_resumed_run_keeps_its_recorded_prodigal_use():
+    # prodigal is also flagged DURING processing (e.g. NCBI accessions without a
+    # protein file); rebuilding ToolsUsed from args alone on a resume dropped it
+    import types
+    from gtotree.utils.misc.general import ToolsUsed
+    from gtotree.utils.misc.preflight_checks import track_tools_used
+    rd = RunData()
+    rd.tools_used = ToolsUsed(prodigal_used=True)
+    args = types.SimpleNamespace(fasta_files=None, genbank_files=None,
+                                 tree_program="FastTreeMP", hmm="Bacteria",
+                                 target_pfams_file=None, target_kos_file=None,
+                                 add_gtdb_tax=False, nucleotide_mode=False)
+    rd = track_tools_used(args, rd)
+    assert rd.tools_used.prodigal_used

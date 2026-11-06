@@ -50,10 +50,12 @@ def parser():
 
     primary.add_argument("-w", "--wanted-ref-tax", metavar="<str>", type=str,
                          action="append", default=None)
-    primary.add_argument("-a", "--ncbi-accessions", metavar="<file>", type=str)
-    primary.add_argument("-g", "--genbank-files", metavar="<file>", type=str)
-    primary.add_argument("-f", "--fasta-files", metavar="<file>", type=str)
-    primary.add_argument("-A", "--amino-acid-files", metavar="<file>", type=str)
+    # each takes one or more values: the genome files themselves (or accessions, for
+    # `-a`), patterns, and/or files listing them -- see utils/misc/genome_inputs.py
+    primary.add_argument("-a", "--ncbi-accessions", metavar="<str>", type=str, nargs="+")
+    primary.add_argument("-g", "--genbank-files", metavar="<file>", type=str, nargs="+")
+    primary.add_argument("-f", "--fasta-files", metavar="<file>", type=str, nargs="+")
+    primary.add_argument("-A", "--amino-acid-files", metavar="<file>", type=str, nargs="+")
     primary.add_argument("-H", "--hmm", metavar="<file>", type=str)
 
     # not a flag: set by preflight when `-H` was left off and a set was chosen from `-w`,
@@ -103,7 +105,7 @@ def parser():
     opt.add_argument("-M", "--muscle-threads", metavar="<int>", type=int, default=5, dest="num_muscle_threads")
     opt.add_argument("-X", "--no-super5", action="store_true")
     opt.add_argument("-N", "--no-tree", action="store_true")
-    opt.add_argument("-T", "--tree-program", metavar="<str>", type=str, default="FastTreeMP")
+    opt.add_argument("-T", "--tree-program", metavar="<str>", type=str, default="VeryFastTree")
     opt.add_argument("-z", "--nucleotide-mode", action="store_true")
     opt.add_argument("-k", "--keep-gene-alignments", action="store_true")
     opt.add_argument("-R", "--resume", action="store_true")

@@ -258,3 +258,41 @@ class TestPhaseOneIsSharedAcrossPrograms:
 
         assert "resolve_input_genomes" in inspect.getsource(stages.resolve_input_genomes)
         assert resolve_input_genomes.__module__ == "gtotree.utils.misc.general"
+
+
+class TestPhaseOneRefusesGenomeIdCollisions:
+    """
+    The main gtotree preflight refuses two inputs that resolve to the same genome ID,
+    but the shared phase-1 resolver used by `gtt gen-scg-hmms` and
+    `gtt search-annotations` didn't, so e.g. two `contigs.faa` files from different
+    directories were silently merged into one genome
+    """
+
+    def _args(self, listing):
+        return argparse.Namespace(
+            ncbi_accessions=None, wanted_ref_tax=None, genbank_files=None,
+            fasta_files=None, amino_acid_files=listing, source="gtdb",
+            target_rank=None, derep_rank="off",
+            min_completeness=None, max_contamination=None)
+
+    def test_two_inputs_with_the_same_id_are_refused(self, tmp_path):
+        import pytest # type: ignore
+        from gtotree.utils.target_search import target_search_stages as stages
+        from gtotree.utils.target_search.target_search_setup import (
+            _populate_input_genomes)
+        from gtotree.utils.target_search.target_search_setup import TargetSearchError
+
+        paths = []
+        for sub in ("s1", "s2"):
+            (tmp_path / sub).mkdir()
+            genome = tmp_path / sub / "contigs.faa"
+            genome.write_text(">p1\nMKVLAAAL\n")
+            paths.append(str(genome))
+        listing = tmp_path / "aa.txt"
+        listing.write_text("\n".join(paths) + "\n")
+
+        args = self._args(str(listing))
+        run_data = RunData()
+        _populate_input_genomes(args, run_data)
+        with pytest.raises(TargetSearchError, match="contigs"):
+            stages.resolve_input_genomes(args, run_data)

@@ -304,3 +304,52 @@ def test_concurrent_workers_do_not_share_one_context():
                      lambda i, r, rd: applied.append(r), _args(4), None)
 
     assert sorted(applied) == list(range(16))
+
+
+# ---------------------------------------------------------------------------
+# checkpointing
+# ---------------------------------------------------------------------------
+
+def test_checkpoint_saves_progress_as_results_are_applied():
+    applied, saved = [], []
+    run_pooled_stage(list(range(10)), lambda i, rd: i,
+                     lambda i, r, rd: applied.append(i), _args(2), None,
+                     checkpoint=lambda rd: saved.append(len(applied)),
+                     checkpoint_seconds=0)
+    assert saved, "no checkpoint was taken during the stage"
+    assert all(0 < n <= 10 for n in saved)
+
+
+def test_checkpoint_waits_for_its_interval():
+    saved = []
+    run_pooled_stage(list(range(10)), lambda i, rd: i, lambda i, r, rd: None,
+                     _args(2), None, checkpoint=lambda rd: saved.append(1),
+                     checkpoint_seconds=3600)
+    assert saved == []
+
+
+def test_an_interrupt_saves_what_was_applied_before_it():
+    applied, saved = [], []
+
+    def apply_result(item, result, rd):
+        applied.append(item)
+        if len(applied) == 3:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_pooled_stage(list(range(20)), lambda i, rd: i, apply_result, _args(2),
+                         None, checkpoint=lambda rd: saved.append(len(applied)),
+                         checkpoint_seconds=3600)
+    assert saved == [3]
+
+
+def test_a_failing_checkpoint_does_not_mask_the_interrupt():
+    def apply_result(item, result, rd):
+        raise KeyboardInterrupt
+
+    def checkpoint(rd):
+        raise OSError("disk full")
+
+    with pytest.raises(KeyboardInterrupt):
+        run_pooled_stage([1, 2], lambda i, rd: i, apply_result, _args(1), None,
+                         checkpoint=checkpoint, checkpoint_seconds=3600)

@@ -21,11 +21,11 @@ directory is already the search results.
 import os
 import shutil
 import argparse
+from gtotree.utils.misc.genome_inputs import input_entries
 from gtotree.utils.misc.general import (GenomeData, RunData, ToolsUsed,
                                         SOURCE_GENBANK, SOURCE_FASTA,
                                         SOURCE_AMINO_ACID,
-                                        prepare_output_dir,
-                                        read_single_column_file)
+                                        prepare_output_dir)
 from gtotree.utils.taxonomy.tax_targets import is_all_target
 from gtotree.utils.misc.target_id_checks import (check_target_id_file,
                                                  TargetIDFormatError)
@@ -166,14 +166,22 @@ def check_dependencies(args, spec):
         if not shutil.which(binary):
             missing.append(binary)
 
-    if _might_need_prodigal(args) and not shutil.which("prodigal"):
-        missing.append("prodigal")
+    if _might_need_prodigal(args) and not _pyrodigal_available():
+        missing.append("pyrodigal (for gene calling)")
 
     if missing:
         joined = ", ".join(missing)
         was = "is" if len(missing) == 1 else "are"
         raise TargetSearchError(
             f"{joined} {was} needed for this run, but not in your PATH :(")
+
+
+def _pyrodigal_available():
+    try:
+        import pyrodigal  # type: ignore  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def _might_need_prodigal(args):
@@ -443,12 +451,12 @@ def _populate_input_genomes(args, run_data):
     run_data.update_all_input_genomes()
 
 
-def _read_entries(path):
+def _read_entries(value):
     """
-    Thin alias for the shared reader, so this program and a full GToTree run agree on
-    what a listing file contains (blanks dropped, duplicates removed, order preserved).
+    The entries of a genome-input arg, through the same resolver a full GToTree run
+    uses, so both agree on what a given input yields
     """
-    return read_single_column_file(path)
+    return input_entries(value)
 
 
 ################################################################################
@@ -463,20 +471,18 @@ def validate_genome_input_files(args):
     validate the genome files once while validating each target type's targets file
     on its own (they're separate files with separate ID shapes).
 
-    These are the same checks the main driver applies: whitespace, CRLF line endings,
-    duplicate entries, and (for the file-listing flags) that every listed genome file
-    actually exists.
+    These are the same checks the main driver applies: the genome inputs are resolved
+    (files, patterns, and/or list files), repeated entries mentioned, and every genome
+    file required to exist; the exclusion list gets the single-column checks.
     """
-    from gtotree.utils.misc.preflight_checks import check_expected_single_column_input
+    from gtotree.utils.misc.preflight_checks import (check_expected_single_column_input,
+                                                     resolve_and_check_genome_inputs)
 
-    for dest, flag in (("ncbi_accessions", "-a"),
-                       ("genbank_files", "-g"),
-                       ("fasta_files", "-f"),
-                       ("amino_acid_files", "-A"),
-                       ("exclusion_list", "--exclusion-list")):
-        value = getattr(args, dest, None)
-        if value:
-            setattr(args, dest, check_expected_single_column_input(value, flag))
+    args = resolve_and_check_genome_inputs(args)
+
+    if getattr(args, "exclusion_list", None):
+        args.exclusion_list = check_expected_single_column_input(args.exclusion_list,
+                                                                 "--exclusion-list")
 
     return args
 

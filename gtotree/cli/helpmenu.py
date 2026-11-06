@@ -384,7 +384,7 @@ ENTRIES = [
          BRIEF),
 
         ("-T | --tree-program <str>",
-         "tree program to use; default: FastTreeMP",
+         "tree program to use; default: VeryFastTree",
          """
          Which program to use for tree generation. Currently supported are
          "FastTree", "FastTreeMP", "VeryFastTree", and "IQTREE". These run with
@@ -413,16 +413,10 @@ ENTRIES = [
          FULL),
 
         ("-X | --no-super5",
-         "override super5 alignment",
+         "use muscle's standard alignment instead of super5",
          """
-         If working with greater than 500 target genomes, GToTree will by default
-         use the 'super5' muscle alignment algorithm to increase the speed of the
-         alignments. Provide this flag if you want to prevent that from happening and
-         use the standard muscle alignment instead.
-
-         Note: See sections in the link below for more information on working with
-         many genomes:
-             github.com/AstrobioMike/GToTree/wiki/things-to-consider
+         Provide this flag to use muscle's standard alignment algorithm instead
+         of it's 'super5' algorithm.
          """,
          FULL),
 
@@ -470,11 +464,21 @@ REQUIRED_INPUTS = [
     ("-w  <str>",
      ("wanted ref tax to include (see full help for details)",
       "wanted ref tax to include (see more details below)")),
-    ("-a <file>", "single-column file of NCBI assembly accessions"),
-    ("-f <file>", "single-column file with the paths to each fasta file"),
-    ("-A <file>", "single-column file with the paths to each amino-acid file"),
-    ("-g <file>", "single-column file with the paths to each genbank file"),
+    ("-a  <str>", "NCBI assembly accessions, and/or file(s) listing them"),
+    ("-f <file>", "fasta files, and/or a file listing their paths"),
+    ("-A <file>", "amino-acid files, and/or a file listing their paths"),
+    ("-g <file>", "genbank files, and/or a file listing their paths"),
 ]
+
+# shown under the genome inputs in the detailed menu
+GENOME_INPUTS_NOTE = """
+         Each of -a/-f/-A/-g takes one or more values, in any mix of the files
+         themselves (e.g., `-f fastas/*.fasta`), a quoted pattern GToTree
+         expands itself (e.g., `-f "fastas/*.fasta"`), and single-column files
+         listing them. With many thousands of files, quote the pattern or use a
+         list file: an unquoted wildcard can exceed the shell's command-line
+         length limit.
+"""
 
 HMM_INPUT = (
     "-H <file>",
@@ -494,6 +498,9 @@ def required_inputs_section(detailed=False):
 
     for flags, brief in REQUIRED_INPUTS:
         out += entry(pick(flags, detailed), brief, detailed, align_continuation=True)
+
+    if detailed:
+        out += GENOME_INPUTS_NOTE
 
     out += "\n" + numbered_heading(
         2, "The target single-copy gene (SCG) HMMs to use")

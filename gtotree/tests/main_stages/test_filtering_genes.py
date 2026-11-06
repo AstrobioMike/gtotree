@@ -274,3 +274,40 @@ class TestCompletedStageIsNotRecomputed:
         filter_genes(_Args(), rd)
 
         assert (tmp_path / "SCG-info.tsv").exists()
+
+
+class TestHitCountsForGenomeFiltering:
+    """
+    `num_SCG_hits_after_filtering` feeds `-G`, which is documented as hits to the
+    target SCGs that end up in the final tree. It used to be tallied before `-r`
+    removed any SCG-sets, so hits to removed sets still counted
+    """
+
+    def _setup(self, tmp_path):
+        genome_ids = [f"G{i}" for i in range(10)]
+        scg_ids = [f"S{i}" for i in range(10)]
+        rd = _run_data(tmp_path, n_genomes=10, scg_ids=scg_ids)
+        rd.found_SCG_seqs_dir = str(tmp_path)
+        rd.run_data_path = str(tmp_path / "run-data.json")
+        rd.general_ext = ".faa"
+        rd.seq_length_cutoff = 0.2
+        from datetime import datetime
+        rd.start_time = datetime.now()   # the stage's progress report reads it
+        rd.run_files_dir_rel = str(tmp_path)
+        # S0-S3 hit by G1-G9; S4-S9 hit only by G0, so `-r 0.5` removes them
+        for i, scg in enumerate(scg_ids):
+            hitters = genome_ids[1:] if i < 4 else ["G0"]
+            with open(tmp_path / f"{scg}.faa", "w") as fh:
+                for g in hitters:
+                    fh.write(f">{g}\nMKTAYIAKQR\n")
+        return rd
+
+    def test_hits_to_sets_removed_by_r_are_not_counted(self, tmp_path):
+        rd = self._setup(tmp_path)
+        rd = filter_genes(_Args(), rd)
+
+        assert [s.id for s in rd.get_all_SCG_targets_remaining()] == \
+            ["S0", "S1", "S2", "S3"]
+        counts = {g.id: g.num_SCG_hits_after_filtering for g in rd.all_input_genomes}
+        assert counts["G0"] == 0
+        assert counts["G1"] == 4

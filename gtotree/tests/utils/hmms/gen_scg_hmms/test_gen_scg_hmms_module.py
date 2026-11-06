@@ -273,6 +273,19 @@ def test_threshold_boundary_is_inclusive():
     assert wanted == []
 
 
+def test_threshold_boundary_is_exact_despite_float_rounding():
+    """
+    55/100.0*100 is 55.00000000000001, so a Pfam single-copy in exactly 55 of 100
+    genomes used to fail `-p 55` while passing `-p 54`
+    """
+    genomes, hits = _hits({"fifty_five": [1] * 55 + [0] * 45}, n_genomes=100)
+    for percent in (54, 55):
+        wanted, _ = count_single_copy_hits(hits, genomes, ["fifty_five"], percent)
+        assert wanted == ["fifty_five"], f"-p {percent}"
+    wanted, _ = count_single_copy_hits(hits, genomes, ["fifty_five"], 56)
+    assert wanted == []
+
+
 def test_matches_v1_criterion_across_thresholds():
     """
     Cross-check against v1's criterion transcribed directly:

@@ -18,6 +18,7 @@ import argparse
 
 from tqdm import tqdm  # type: ignore
 
+from gtotree.utils.misc.genome_inputs import GenomeInputError, resolve_genome_input_args
 from gtotree.cli.common import (CustomRichHelpFormatter, add_help, add_version_arg,
                                 run_subcommand_main)
 from gtotree.utils.misc.general import (run_pooled_stage,
@@ -206,33 +207,36 @@ def build_parser(parent_subparsers=None):
 
     required.add_argument(
         "-a", "--ncbi-accessions",
-        metavar="<FILE>",
-        help=("A single-column file of NCBI accessions to build the SCG set from."),
-        action="store",
-    )
-
-    required.add_argument(
-        "-g", "--genbank-files",
-        metavar="<FILE>",
-        help=("A single-column file listing GenBank files to include (the same input "
-              "style as the main GToTree program)."),
-        action="store",
+        metavar="<STR>",
+        nargs="+",
+        help=("NCBI accessions to build the SCG set from, given directly (e.g. "
+              "GCF_000005845.2) and/or as single-column files listing them."),
     )
 
     required.add_argument(
         "-f", "--fasta-files",
         metavar="<FILE>",
-        help=("A single-column file listing nucleotide fasta files to include; genes "
-              "will be called with prodigal."),
-        action="store",
+        nargs="+",
+        help=("Nucleotide fasta files to include (genes will be called), each holding one genome, "
+              "given directly as a quoted pattern (e.g., \"*.fasta\") and/or a single-column file listing "
+              "their paths."),
     )
 
     required.add_argument(
         "-A", "--amino-acid-files",
         metavar="<FILE>",
-        help=("A single-column file listing amino-acid fasta files to include; each "
-              "should hold the proteins for one genome."),
-        action="store",
+        nargs="+",
+        help=("Amino-acid fasta files to include, each holding the proteins for one "
+              "genome, given directly as a quoted pattern and/or a single-column "
+              "file listing their paths."),
+    )
+
+    required.add_argument(
+        "-g", "--genbank-files",
+        metavar="<FILE>",
+        nargs="+",
+        help=("GenBank files to include, given as a quoted pattern "
+              "and/or a single-column file listing their paths."),
     )
 
     required.add_argument(
@@ -509,11 +513,25 @@ def _check_from_run_args(args):
             "`-p` and `--max-hmms` set how the new set is selected.")
 
     out_dir = os.path.realpath(args.output_dir.rstrip("/"))
-    if out_dir == os.path.realpath(args.from_run.rstrip("/")):
+    from_dir = os.path.realpath(args.from_run.rstrip("/"))
+    # an `-o` that CONTAINS the previous run is refused too: `-F` clears `-o` before
+    # the scan record is copied out of it, which would delete the run being read
+    if os.path.commonpath([out_dir, from_dir]) == out_dir:
         raise GenSCGHMMsError(
             "`--from-run` writes a new set to a new directory and leaves the previous "
             "run as it is, so `-o` needs to be a different directory than the "
-            "`--from-run` one.")
+            "`--from-run` one (and not one that contains it).")
+
+
+def resolve_genome_inputs(args):
+    """
+    Turn -a/-g/-f/-A (files, patterns, and/or list files) into one ResolvedInputs per
+    flag, raising GenSCGHMMsError for one that can't be resolved. Idempotent.
+    """
+    try:
+        return resolve_genome_input_args(args)
+    except GenomeInputError as err:
+        raise GenSCGHMMsError(str(err)) from err
 
 
 def check_args(args):
@@ -530,8 +548,8 @@ def check_args(args):
                    getattr(args, "from_run", None))
     if not any(input_flags):
         raise GenSCGHMMsError(
-            "We need some target genomes to work with! Provide any combination of an "
-            "accessions file (`-a`), GenBank files (`-g`), fasta files (`-f`), "
+            "We need some target genomes to work with! Provide any combination of "
+            "accessions (`-a`), GenBank files (`-g`), fasta files (`-f`), "
             "amino-acid files (`-A`), and/or a target taxon (`-w`). Or a previous "
             "run to build a new set from (with `--from-run`).")
 
@@ -549,7 +567,7 @@ def check_args(args):
         raise GenSCGHMMsError("The `--num-threads` (-t) parameter needs to be at least 1.")
 
     if args.num_jobs < 1:
-        raise GenSCGHMMsError("The `--num-jobs` (-n) parameter needs to be at least 1.")
+        raise GenSCGHMMsError("The `--num-jobs` (-j) parameter needs to be at least 1.")
 
     if args.min_completeness is not None and not 0 <= args.min_completeness <= 100:
         raise GenSCGHMMsError(
@@ -1086,6 +1104,7 @@ def _remove_quietly(path):
 
 def gen_scg_hmms(args):  # pragma: no cover
     args = check_args(args)
+    args = resolve_genome_inputs(args)
 
     if args.from_run:
         return gen_scg_hmms_from_run(args)
@@ -1104,6 +1123,10 @@ def gen_scg_hmms(args):  # pragma: no cover
     run_data, _selections = phase_resolve_genomes(args, run_data)
 
     adopt_genome_progress(run_data, previous)
+    if previous is not None:
+        # run-level, so adopt_genome_progress doesn't carry it; left fresh, a resume
+        # that reuses the genomes stage records prodigal as unused
+        run_data.tools_used = previous.tools_used
 
     total_genomes = len(run_data.all_input_genomes)
     if total_genomes < FEW_GENOMES_THRESHOLD:
@@ -1147,12 +1170,15 @@ def gen_scg_hmms(args):  # pragma: no cover
                      f"Reused amino acids for {len(kept_ids):,} genome(s)"):
             pass
     else:
+        # the search was run over the genome set being redone here, so it can't be
+        # reused against the new one (the Pfam stage doesn't depend on genomes)
+        RESUME.invalidate_from(state, STAGE_SEARCH)
         combined_path, kept_ids = phase_get_amino_acids(run_data, work_dir, args,
                                                         to_fetch, download_info)
-        RESUME.mark_complete(
-            state, STAGE_GENOMES,
-            [combined_path, run_data.run_data_path],
-            work_dir=work_dir)
+        # run-data.json is deliberately not an artifact: it's re-saved on every run
+        # (and its size shifts with any flag), so tracking it by size made each resume
+        # invalidate the genomes stage it had just reused
+        RESUME.mark_complete(state, STAGE_GENOMES, [combined_path], work_dir=work_dir)
         RESUME.save(work_dir, state)
 
     section(f"Phase {n()}: Preparing Pfam profiles...")

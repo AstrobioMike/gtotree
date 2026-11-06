@@ -235,3 +235,19 @@ def test_all_taxon_counts_report_the_dereplicated_size(in_gtdb, capsys):
 def test_derep_rank_off_with_all_still_works(in_gtdb):
     _run(_args(wanted_ref_tax="all", derep_rank="off"))
     assert len(_read_accs("gtdb-arc-and-bac-accs.txt")) == 4
+
+
+def test_refseq_reference_only_taxon_pull_writes_only_reference_genomes(in_gtdb):
+    # `-R` reached the selection core as a bare reps_only=True, which for GTDB means
+    # GTDB species representatives -- so it wrote the `-G` set under a refseq-ref name
+    _run(_args(wanted_ref_tax="Testophyla", refseq_reference_genomes_only=True))
+    accs = _read_accs("gtdb-testophyla-phylum-refseq-ref-accs.txt")
+    assert accs == ["GCA_000000003.1"]
+
+
+def test_refseq_reference_only_all_dereplicated_writes_only_reference_genomes(in_gtdb):
+    # same bool-collapse on the `-w all --derep-rank` path
+    _run(_args(wanted_ref_tax="all", derep_rank="class",
+               refseq_reference_genomes_only=True))
+    accs = _read_accs("gtdb-arc-and-bac-refseq-ref-accs.txt")
+    assert accs == ["GCA_000000003.1"]

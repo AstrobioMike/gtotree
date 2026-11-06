@@ -12,13 +12,14 @@ and gets an amino-acid fasta for each, reusing GToTree's existing NCBI machinery
 """
 
 import os
-import subprocess
 from types import SimpleNamespace
 
 import pyarrow as pa  # type: ignore
 import pyarrow.compute as pc  # type: ignore
 import pyarrow.parquet as pq  # type: ignore
 
+from gtotree.utils.misc.gene_calling import call_genes, GenomeTooShort
+from gtotree.utils.misc.genome_inputs import ResolvedInputs
 from gtotree.utils.misc.general import run_pooled_stage, GenomeData
 from gtotree.utils.ncbi.get_ncbi_assembly_data import ncbi_data_table_path
 from gtotree.utils.ncbi.parse_ncbi_assembly_summary import resolve_base_link
@@ -54,8 +55,10 @@ def build_run_data(args, out_dir, work_dir):
     run_data.tools_used = ToolsUsed()
 
     if args.ncbi_accessions:
-        run_data.ncbi_accs = [GenomeData.from_acc(acc)
-                              for acc in read_accessions_file(args.ncbi_accessions)]
+        accs = (args.ncbi_accessions.entries
+                if isinstance(args.ncbi_accessions, ResolvedInputs)
+                else read_accessions_file(args.ncbi_accessions))
+        run_data.ncbi_accs = [GenomeData.from_acc(acc) for acc in accs]
 
     populate_local_genomes(args, run_data)
 
@@ -331,26 +334,17 @@ def fetch_amino_acids(accession, entry, work_dir, nucleotide_fallback=True):
 
 def run_prodigal(nucleotide_path, out_aa_path):
     """
-    Call genes on a nucleotide fasta with prodigal. Writes atomically so a failed or
-    interrupted call never leaves a partial faa behind.
+    Call genes on a nucleotide fasta (prodigal's algorithm, via pyrodigal). Writes
+    atomically so a failed or interrupted call never leaves a partial faa behind.
     """
-    tmp_path = out_aa_path + ".part"
     try:
-        result = subprocess.run(
-            ["prodigal", "-c", "-q", "-i", nucleotide_path, "-a", tmp_path],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        )
-        if result.returncode != 0:
-            raise TargetGenomeError(MISSED_PRODIGAL_FAILED)
-        os.replace(tmp_path, out_aa_path)
-    except FileNotFoundError as e:
-        _remove_quietly(tmp_path)
+        call_genes(nucleotide_path, out_aa_path)
+    except ImportError as e:
         raise TargetGenomeError(
-            "prodigal doesn't seem to be available, but it's needed for genomes that "
+            "pyrodigal doesn't seem to be available, but it's needed for genomes that "
             "have no protein file at NCBI.") from e
-    except BaseException:
-        _remove_quietly(tmp_path)
-        raise
+    except (GenomeTooShort, OSError, ValueError) as e:
+        raise TargetGenomeError(MISSED_PRODIGAL_FAILED) from e
 
 
 def relabel_and_append(accession, aa_path, combined_handle):

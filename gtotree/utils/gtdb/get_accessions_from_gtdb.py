@@ -109,7 +109,7 @@ def get_accessions_from_gtdb(args):
 
     if args.get_table:
         copy_gtdb_table(gtdb_path)
-        sys.exit(1)
+        sys.exit(0)
 
     _report_gtdb_version(gtdb_path)
 
@@ -208,7 +208,9 @@ def _select_rows(gtdb_path, args, representatives_source):
     Resolve the target taxon through the shared taxonomy core and return the
     RefGenomeSelection (accessions + metadata rows + resolved rank/canonical)
     """
-    reps_only = representatives_source is not None
+    # the explicit predicate, not just a bool: a bool would always mean GTDB's own
+    # species reps, silently turning `-R` (RefSeq reference genomes) into `-G`
+    reps_only = _rep_filter_for(representatives_source) or False
 
     try:
         selection = select_ref_genomes(
@@ -288,7 +290,9 @@ def _derep_is_on(args):
 
 def _write_all_dereplicated(gtdb_path, args, representatives_source):
     """`-w all` WITH --derep-rank: one selection per domain, merged."""
-    reps_only = representatives_source is not None
+    # the explicit predicate, not just a bool: a bool would always mean GTDB's own
+    # species reps, silently turning `-R` (RefSeq reference genomes) into `-G`
+    reps_only = _rep_filter_for(representatives_source) or False
 
     try:
         selection = select_all_domains(gtdb_path, "gtdb", derep_rank=args.derep_rank,

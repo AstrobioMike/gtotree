@@ -476,3 +476,51 @@ def test_eukaryote_alias_resolves(in_ncbi, tmp_path):
     _run(_args(wanted_ref_tax="eukarya", ncbi_section="both"))
     accs = _read_accs("ncbi-eukaryota-domain-accs.txt")
     assert accs == ["GCF_000000020.1"]
+
+
+def _exclusion_file(tmp_path, accs):
+    path = tmp_path / "exclude.txt"
+    path.write_text("\n".join(accs) + "\n")
+    return str(path)
+
+
+def test_exclusion_list_applies_to_all_without_derep(in_ncbi):
+    # the `-w all` derep-off path read the pool without the exclusion cores
+    _run(_args(wanted_ref_tax="all", ncbi_section="both",
+               exclusion_list=_exclusion_file(in_ncbi, ["GCF_000000001.1"])))
+    accs = _read_accs("ncbi-all-accs.txt")
+    assert "GCF_000000001.1" not in accs
+    assert len(accs) == 3
+
+
+def test_exclusion_list_applies_to_a_taxid_pull(in_ncbi):
+    # the taxid path never consulted the exclusion list at all
+    _run(_args(wanted_ref_tax="5000", ncbi_section="both",
+               exclusion_list=_exclusion_file(in_ncbi, ["GCF_000000001.1"])))
+    accs = _read_accs("ncbi-taxid-5000-accs.txt")
+    assert "GCF_000000001.1" not in accs
+    assert len(accs) == 3
+
+
+_EUK_RECORDS = [
+    _rec("GCF_000000101.1", ("Eukaryota", "Fungophyla", "FClassA", "FOrdA1", "FFamA", "FGenA", "FGenA sp1")),
+    _rec("GCF_000000102.1", ("Eukaryota", "Fungophyla", "FClassA", "FOrdA2", "FFamB", "FGenB", "FGenB sp1")),
+    _rec("GCF_000000103.1", ("Eukaryota", "Fungophyla", "FClassB", "FOrdB1", "FFamC", "FGenC", "FGenC sp1")),
+]
+
+
+def test_taxon_counts_derep_preview_uses_the_eukaryote_default(tmp_path, monkeypatch,
+                                                              capsys):
+    # the preview resolved `auto` without the taxon's domain, so a eukaryotic phylum
+    # was previewed at 'order' (3 here) while the real pull dereplicated at 'class' (2)
+    monkeypatch.setenv("NCBI_ASSEMBLY_DATA_DIR", str(tmp_path))
+    _write_mock_ncbi(tmp_path / PARQUET_FILENAME, _RECORDS + _EUK_RECORDS)
+    (tmp_path / DATE_FILENAME).write_text("2026,01,05\n")
+    monkeypatch.chdir(tmp_path)
+    with patch(f"{MODPATH}.get_ncbi_assembly_data", return_value=None):
+        _run(_args(wanted_ref_tax="Fungophyla", derep_rank="auto", get_taxon_counts=True))
+        out = capsys.readouterr().out
+        _run(_args(wanted_ref_tax="Fungophyla", derep_rank="auto"))
+    accs = _read_accs("ncbi-fungophyla-phylum-refseq-accs.txt")
+    assert len(accs) == 2
+    assert "Dereplicated at 'class', that would be 2 genome(s)." in out

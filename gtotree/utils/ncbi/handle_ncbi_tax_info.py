@@ -4,6 +4,7 @@ import pyarrow.parquet as pq # type: ignore
 import pyarrow.compute as pc # type: ignore
 
 from gtotree.utils.taxonomy.tax_ranks import RANKS, accession_core
+from gtotree.utils.misc.general import newick_safe_label_part
 from gtotree.utils.ncbi.get_ncbi_assembly_data import ncbi_data_table_path
 
 _WANTED_COLUMNS = ["assembly_accession", "infraspecific_name"] + list(RANKS)
@@ -25,13 +26,9 @@ def update_mapping_dict_with_ncbi_tax_info(args, run_data):
         if input_acc in run_data.mapping_dict:
             continue
 
-        new_label = f"{input_acc}_"
-        for rank in args.lineage.split(","):
-            new_label += ranks.get(rank.lower(), "NA") + "_"
-
-        new_label = new_label[:-1]
-        new_label = new_label.replace(" ", "_")
-        run_data.mapping_dict[input_acc] = new_label
+        parts = [newick_safe_label_part(ranks.get(rank.lower(), "NA"))
+                 for rank in args.lineage.split(",")]
+        run_data.mapping_dict[input_acc] = "_".join([input_acc] + parts)
 
     return run_data
 
@@ -52,13 +49,15 @@ def subset_ncbi_info(run_data):
     input_accs = run_data.remaining_ncbi_accs()
 
     # map each wanted accession to its numeric core for the join
-    core_to_input = {}
+    # a core can be shared by more than one input (the GCA_ and GCF_ of one assembly);
+    # each of them gets the lineage, rather than only the last one seen
+    core_to_inputs = {}
     for acc in input_accs:
         core = accession_core(acc)
         if core:
-            core_to_input[core] = acc
+            core_to_inputs.setdefault(core, []).append(acc)
 
-    if not core_to_input:
+    if not core_to_inputs:
         return {}
 
     ncbi_path = ncbi_data_table_path(os.environ['NCBI_ASSEMBLY_DATA_DIR'])
@@ -67,7 +66,7 @@ def subset_ncbi_info(run_data):
     # only rows whose core is one we want, then materialize just those matched rows.
     acc_col = pq.read_table(ncbi_path, columns=["assembly_accession"]).column(0)
     cores = pc.replace_substring_regex(acc_col, _ACCESSION_CORE_REGEX, r'\1')
-    mask = pc.is_in(cores, value_set=pa.array(list(core_to_input.keys())))
+    mask = pc.is_in(cores, value_set=pa.array(list(core_to_inputs.keys())))
     keep_idx = pc.indices_nonzero(mask)
 
     subset = pq.read_table(ncbi_path, columns=_WANTED_COLUMNS).take(keep_idx)
@@ -78,31 +77,35 @@ def subset_ncbi_info(run_data):
 
     result = {}
     for i, acc in enumerate(acc_matched):
-        input_acc = core_to_input.get(accession_core(acc))
-        if input_acc is None:
-            continue
-        # a GCA and GCF row can share a core; keep the first match, but prefer a row
-        # that actually has lineage (non-NA domain) if we've already stored an NA one
-        if input_acc in result and result[input_acc].get("domain", "NA") != "NA":
-            continue
-
-        ranks = {rank: rank_cols[rank][i] for rank in RANKS}
-
-        # capture the FULL "Genus species" before genus-stripping, for strain de-dup
-        full_species = ranks.get("species")
-
-        # species stores "Genus species"; strip the leading genus so labels don't
-        # carry the genus twice
-        genus = ranks.get("genus")
-        species = ranks.get("species")
-        if isinstance(species, str) and isinstance(genus, str):
-            ranks["species"] = species.removeprefix(f"{genus} ")
-
-        ranks["strain"] = _strain_from_infraspecific(infra_col[i], full_species)
-
-        result[input_acc] = ranks
+        for input_acc in core_to_inputs.get(accession_core(acc), ()):
+            # a GCA and GCF row can share a core; keep the first match, but prefer a
+            # row that actually has lineage (non-NA domain) over an NA one
+            if input_acc in result and result[input_acc].get("domain", "NA") != "NA":
+                continue
+            result[input_acc] = _ranks_for_row(i, rank_cols, infra_col)
 
     return result
+
+
+def _ranks_for_row(i, rank_cols, infra_col):
+    """
+    One matched NCBI row as {rank: value, ..., 'strain': value} for labelling
+    """
+    ranks = {rank: rank_cols[rank][i] for rank in RANKS}
+
+    # capture the FULL "Genus species" before genus-stripping, for strain de-dup
+    full_species = ranks.get("species")
+
+    # species stores "Genus species"; strip the leading genus so labels don't
+    # carry the genus twice
+    genus = ranks.get("genus")
+    species = ranks.get("species")
+    if isinstance(species, str) and isinstance(genus, str):
+        ranks["species"] = species.removeprefix(f"{genus} ")
+
+    ranks["strain"] = _strain_from_infraspecific(infra_col[i], full_species)
+
+    return ranks
 
 
 def _strain_from_infraspecific(infraspecific_name, full_species):

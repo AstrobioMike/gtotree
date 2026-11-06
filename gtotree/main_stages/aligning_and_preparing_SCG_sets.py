@@ -22,7 +22,8 @@ def align_and_prepare_SCG_sets(args, run_data):
 
     if not run_data.stage_is_complete(PipelineStage.ALIGN_SCG_SETS):
 
-        scgs_to_align = run_data.get_all_SCG_targets_remaining()
+        scgs_to_align = largest_first(run_data.get_all_SCG_targets_remaining(),
+                                      run_data)
 
         if len(scgs_to_align) > 0:
             run_data = run_pooled_stage(scgs_to_align,
@@ -44,6 +45,22 @@ def align_and_prepare_SCG_sets(args, run_data):
     report_SCG_alignment_update(run_data)
 
     return run_data
+
+
+def largest_first(scgs, run_data):
+    """
+    The SCG-sets in the order to start aligning them: biggest input first
+
+    Alignment time grows faster than linearly with a set's size, so a big set that
+    happens to come last in the HMM file starts when the others are nearly done and
+    runs alone on one core at the end. This helps balance the workload.
+    """
+    def input_size(scg):
+        try:
+            return os.path.getsize(_scg_paths(scg.id, run_data)["inpath"])
+        except OSError:
+            return 0  # the worker reports the missing input as a failure
+    return sorted(scgs, key=input_size, reverse=True)
 
 
 def capture_failed_alignment_logs(run_data):

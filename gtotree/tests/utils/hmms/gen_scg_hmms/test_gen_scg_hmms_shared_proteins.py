@@ -222,6 +222,26 @@ def test_three_domains_on_one_protein_leave_one():
     assert {ex.dropped_acc for ex in exclusions} == {B, C}
 
 
+def test_a_pfam_is_never_dropped_in_favour_of_one_that_was_dropped_itself():
+    """
+    A-B and A-C conflict, B-C don't; C is the most widely single-copy, then A, then
+    B. Settled pair by pair (most-shared first) this came out as "B lost to A", then
+    "A lost to C" -- just [C], with B blamed on a Pfam not in the output. B+C is valid.
+    """
+    genomes = [f"g{i}" for i in range(10)]
+    hits = _hits(genomes, [A, B, C])
+    hits["g0"][A] = 2                       # A single-copy in 9
+    hits["g0"][B] = 2; hits["g1"][B] = 2    # B single-copy in 8, C in 10
+    shared = {g: {shared_pair_key(A, B): 1} for g in genomes}       # 10 genomes
+    for g in genomes[:6]:
+        shared[g][shared_pair_key(A, C)] = 1                         # 6 genomes
+
+    kept, exclusions = _resolve([A, B, C], shared, genomes, hits,
+                                max_shared_percent=50)
+    assert kept == [B, C]
+    assert [(ex.dropped_acc, ex.kept_acc) for ex in exclusions] == [(A, C)]
+
+
 def test_pairs_involving_a_non_retained_pfam_are_ignored():
     genomes = [f"g{i}" for i in range(5)]
     hits = _hits(genomes, [A, B])

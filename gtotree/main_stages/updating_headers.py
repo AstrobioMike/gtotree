@@ -19,6 +19,11 @@ def update_headers(args, run_data):
 
         run_data.header_update_error = ""
 
+        # the labels are built into mapping_dict in place (taxonomy, then suffixes),
+        # so a failed attempt is rolled back to this before the fallback persists
+        # anything: otherwise the `-R` retry re-applied the suffixes on top (g1_sfx_sfx)
+        base_mapping = dict(run_data.mapping_dict)
+
         try:
             if args.add_gtdb_tax:
                 run_data = update_mapping_dict_with_gtdb_tax_info(args, run_data)
@@ -31,6 +36,7 @@ def update_headers(args, run_data):
             run_data = swap_labels_in_alignment(run_data)
 
         except Exception as err:
+            run_data.mapping_dict = base_mapping
             return _carry_on_with_original_labels(run_data, err)
 
         run_data.mark_stage_complete(PipelineStage.UPDATE_HEADERS)

@@ -15,13 +15,17 @@ import sys
 import time
 import shutil
 import argparse
+import gzip
 import urllib.request
 import urllib.error
+import http.client
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from tqdm import tqdm # type: ignore
 
+from gtotree.utils.misc.genome_inputs import (GenomeInputError, ResolvedInputs,
+                                              input_entries, resolve_accessions)
 from gtotree.cli.common import CustomRichHelpFormatter, add_version_arg
 from gtotree.utils.misc.processing_genomes import (_sleep_backoff,
                                                    NCBI_DOWNLOAD_MAX_RETRIES,
@@ -111,10 +115,12 @@ def build_parser(parent_subparsers=None, show_detailed=False):
 
     required.add_argument(
         "-a", "--ncbi-accessions",
-        metavar="<FILE>",
+        metavar="<STR>",
         dest="ncbi_accessions",
         default=None,
-        help="Single-column file of wanted NCBI assembly accessions",
+        nargs="+",
+        help=("Wanted NCBI assembly accessions, given directly (e.g. GCF_000005845.2) "
+              "and/or as single-column files listing them"),
     )
 
 
@@ -330,16 +336,21 @@ def preflight_checks(args):
     wanted = getattr(args, "wanted_ref_tax", None)
 
     if not accessions_file and not wanted:
-        report_message("Nothing to download. Provide an accessions file with `-a`, a "
+        report_message("Nothing to download. Provide accessions with `-a`, a "
                        "taxon with `-w`, or both.", "yellow",
                        ii="    ", si="    ", width=100, trailing_newline=True)
         sys.exit(1)
 
-    if accessions_file and not os.path.isfile(accessions_file):
-        report_message(f"The specified accessions file, '{accessions_file}', "
-                       "was not found.", "yellow",
-                       ii="    ", si="    ", width=100, trailing_newline=True)
-        sys.exit(1)
+    # accessions given directly and/or in files listing them (genome_inputs.py)
+    if accessions_file and not isinstance(accessions_file, ResolvedInputs):
+        values = ([accessions_file] if isinstance(accessions_file, str)
+                  else list(accessions_file))
+        try:
+            args.ncbi_accessions = resolve_accessions(values, "-a")
+        except GenomeInputError as err:
+            report_message(str(err), "yellow",
+                           ii="    ", si="    ", width=100, trailing_newline=True)
+            sys.exit(1)
 
     if (getattr(args, "assembly_level", None)
             and getattr(args, "source", "gtdb") == "gtdb"):
@@ -420,14 +431,10 @@ def resolve_targets(args):
     accessions = []
     seen = set()
 
-    accessions_file = getattr(args, "ncbi_accessions", None)
-    if accessions_file:
-        with open(accessions_file, "r") as f:
-            for line in f:
-                acc = line.strip()
-                if acc and acc not in seen:
-                    seen.add(acc)
-                    accessions.append(acc)
+    for acc in input_entries(getattr(args, "ncbi_accessions", None)):
+        if acc not in seen:
+            seen.add(acc)
+            accessions.append(acc)
 
     num_from_file = len(accessions)
 
@@ -521,8 +528,10 @@ def report_selection(accessions, selections, expansion_note, args):
         report_message(note, "yellow", ii="    ", si="    ", width=100)
 
     if num_from_file:
-        wprint(f"{num_from_file:,} accession(s) read from "
-               f"{color_text(args.ncbi_accessions)}", ii="    ", si="    ")
+        origin = getattr(args.ncbi_accessions, "describe", None)
+        wprint(f"{num_from_file:,} accession(s) "
+               f"{origin() if origin else 'read from ' + color_text(args.ncbi_accessions)}",
+               ii="    ", si="    ")
         print("")
 
     for sel in selections:
@@ -554,8 +563,7 @@ def report_selection(accessions, selections, expansion_note, args):
 def setup(args, wanted_accs=None):
 
     if wanted_accs is None:
-        with open(args.ncbi_accessions, "r") as f:
-            wanted_accs = [line.strip() for line in f if line.strip()]
+        wanted_accs = input_entries(args.ncbi_accessions)
 
     run_data = RunData(
         wanted_format=args.format,
@@ -693,13 +701,15 @@ def download_one(target_link, local_dest, retries=max_retries):
                     _sleep_backoff(attempt)
                     continue
 
+                expected = resp.headers.get("Content-Length")
                 with open(tmp_path, "wb") as out:
                     shutil.copyfileobj(resp, out, length=1024 * 256)
 
-            if tmp_path.stat().st_size == 0:
+            problem = _downloaded_file_problem(tmp_path, expected)
+            if problem:
                 tmp_path.unlink(missing_ok=True)
                 if attempt == retries:
-                    return (local_dest, "Downloaded file was empty", "failed_transient")
+                    return (local_dest, problem, "failed_transient")
                 _sleep_backoff(attempt)
                 continue
 
@@ -726,11 +736,41 @@ def download_one(target_link, local_dest, retries=max_retries):
                          or err.headers.get("Retry-After") is not None)
             _sleep_backoff(attempt, err, throttled=throttled)
 
-        except (urllib.error.URLError, OSError) as err:
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as err:
+            # HTTPException: IncompleteRead isn't an OSError, and escaping here took
+            # down the whole download pass through future.result()
             tmp_path.unlink(missing_ok=True)
             if attempt == retries:
-                return (local_dest, str(err), "failed_transient")
+                return (local_dest, str(err) or type(err).__name__, "failed_transient")
             _sleep_backoff(attempt)
+
+
+def _downloaded_file_problem(path, expected_length=None):
+    """
+    Why a just-downloaded file can't be trusted, or None if it can
+
+    A skipped re-run trusts anything already at the destination, so a short or corrupt
+    body has to be caught here, before the rename: empty, shorter than the server's
+    Content-Length, or (for .gz) a gzip stream that doesn't read through to the end
+    """
+    size = path.stat().st_size
+    if size == 0:
+        return "Downloaded file was empty"
+    if expected_length:
+        try:
+            expected = int(expected_length)
+        except ValueError:
+            expected = None
+        if expected is not None and size < expected:
+            return f"Download was truncated ({size:,} of {expected:,} bytes)"
+    if str(path).endswith(".gz.tmp") or str(path).endswith(".gz"):
+        try:
+            with gzip.open(path, "rb") as fh:
+                while fh.read(1024 * 1024):
+                    pass
+        except (OSError, EOFError) as err:
+            return f"Downloaded gzip file is corrupt ({type(err).__name__})"
+    return None
 
 
 def run_download_pass(targets, run_data, desc="Progress"):

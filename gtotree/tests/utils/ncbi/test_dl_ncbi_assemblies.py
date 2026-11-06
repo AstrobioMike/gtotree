@@ -49,7 +49,7 @@ class TestParserFollowsGToTreeConventions:
 
     def test_a_is_the_accessions_flag(self):
         args = build_parser().parse_args(["-a", "accs.txt"])
-        assert args.ncbi_accessions == "accs.txt"
+        assert args.ncbi_accessions == ["accs.txt"]   # one or more values
 
     def test_source_defaults_to_gtdb_like_the_main_driver(self):
         assert build_parser().parse_args(["-w", "X"]).source == "gtdb"
@@ -377,13 +377,62 @@ class TestDownloaderUsesUrllibNotRequests:
 class TestDownloadOne:
 
     def test_a_good_response_is_written_atomically(self, tmp_path, monkeypatch):
+        import gzip
         dest = tmp_path / "GCF_1.fasta.gz"
+        payload = gzip.compress(b">c1\nACGT\n")
         monkeypatch.setattr(dlmod.urllib.request, "urlopen",
-                            lambda *a, **k: _resp(b"payload"))
+                            lambda *a, **k: _resp(payload))
         result = dlmod.download_one("http://x/f.gz", str(dest))
         assert result == (str(dest), None, "downloaded")
-        assert dest.read_bytes() == b"payload"
+        assert dest.read_bytes() == payload
         assert not (tmp_path / "GCF_1.fasta.gz.tmp").exists()
+
+    def test_a_body_shorter_than_its_content_length_is_not_trusted(self, tmp_path,
+                                                                  monkeypatch):
+        # a short body used to be renamed into place, and every re-run then
+        # "skipped" the truncated file forever
+        import gzip
+        dest = tmp_path / "GCF_1.fasta.gz"
+        payload = gzip.compress(b">c1\nACGT\n" * 50)
+
+        def short(*a, **k):
+            resp = _resp(payload[:20])
+            resp.headers = {"Content-Type": "application/octet-stream",
+                            "Content-Length": str(len(payload))}
+            return resp
+
+        monkeypatch.setattr(dlmod.urllib.request, "urlopen", short)
+        monkeypatch.setattr(dlmod, "_sleep_backoff", lambda *a, **k: None)
+        _d, err, status = dlmod.download_one("http://x/f.gz", str(dest), retries=2)
+        assert status == "failed_transient"
+        assert "truncated" in err
+        assert not dest.exists()
+
+    def test_a_corrupt_gzip_is_not_trusted(self, tmp_path, monkeypatch):
+        dest = tmp_path / "GCF_1.fasta.gz"
+        monkeypatch.setattr(dlmod.urllib.request, "urlopen",
+                            lambda *a, **k: _resp(b"not really gzip"))
+        monkeypatch.setattr(dlmod, "_sleep_backoff", lambda *a, **k: None)
+        _d, err, status = dlmod.download_one("http://x/f.gz", str(dest), retries=2)
+        assert status == "failed_transient"
+        assert "corrupt" in err
+        assert not dest.exists()
+
+    def test_an_incomplete_read_is_retried_rather_than_raised(self, tmp_path,
+                                                              monkeypatch):
+        # IncompleteRead is an HTTPException, not an OSError/URLError, so it used to
+        # escape download_one and crash the whole pass through future.result()
+        import http.client
+        dest = tmp_path / "GCF_1.fasta.gz"
+
+        def cut_short(*a, **k):
+            raise http.client.IncompleteRead(b"partial", 100)
+
+        monkeypatch.setattr(dlmod.urllib.request, "urlopen", cut_short)
+        monkeypatch.setattr(dlmod, "_sleep_backoff", lambda *a, **k: None)
+        _d, _err, status = dlmod.download_one("http://x/f.gz", str(dest), retries=2)
+        assert status == "failed_transient"
+        assert not dest.exists()
 
     def test_an_existing_nonempty_file_is_skipped(self, tmp_path, monkeypatch):
         dest = tmp_path / "GCF_1.fasta.gz"

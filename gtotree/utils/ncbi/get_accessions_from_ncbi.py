@@ -50,7 +50,8 @@ _NcbiSelection = namedtuple(
 
 
 ################################################################################
-from gtotree.utils.taxonomy.exclusion_list import load_exclusion_cores
+from gtotree.utils.taxonomy.exclusion_list import (load_exclusion_cores,
+                                                   filter_rows_by_exclusion)
 
 
 def build_parser(parent_subparsers=None):
@@ -443,7 +444,9 @@ def _select_rows(table_path, args, assembly_levels=None):
                         rep_filter=_rep_filter(reps_only),
                         accession_prefixes=prefixes,
                         assembly_levels=assembly_levels,
-                        domain_assigned=True)
+                        domain_assigned=True,
+                        exclude_cores=load_exclusion_cores(
+                            getattr(args, "exclusion_list", None)))
         _report_unassigned_domains(unassigned_domain_summary(
             table_path, "ncbi", rep_filter=_rep_filter(reps_only),
             accession_prefixes=prefixes, assembly_levels=assembly_levels))
@@ -453,6 +456,9 @@ def _select_rows(table_path, args, assembly_levels=None):
         rows = _select_by_taxid(table_path, target, reps_only=reps_only,
                                 assembly_levels=assembly_levels)
         rows = _apply_source_prefix(rows, prefixes)
+        rows, _num_excluded = filter_rows_by_exclusion(
+            rows, "assembly_accession",
+            load_exclusion_cores(getattr(args, "exclusion_list", None)))
         return _NcbiSelection(rows, f"taxid {target}", None, f"taxid-{target}")
 
     try:

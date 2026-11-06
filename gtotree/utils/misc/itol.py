@@ -344,7 +344,8 @@ def _read_hit_counts(counts_path):
     The hit-counts tsv has header: genome_id, total_gene_count, <target ...>.
     Target columns are everything after the first two.
     """
-    df = pd.read_csv(counts_path, sep="\t", header=0, dtype={"genome_id": str})
+    df = pd.read_csv(counts_path, sep="\t", header=0, dtype={"genome_id": str},
+                     keep_default_na=False)
     target_ids = [c for c in df.columns if c not in ("genome_id", "total_gene_count")]
 
     counts_by_genome = {}
@@ -363,9 +364,12 @@ def _read_summary(summary_path):
                headers were swapped; if identical, no swap effectively happened)
     in_tree_set: genome_ids whose in_final_tree == "Yes"
     """
-    df = pd.read_csv(summary_path, sep="\t", header=0, dtype={"genome_id": str})
+    # all as text, NA-detection off: an all-numeric label ("0012") or genome id
+    # ("001"), or one spelled "NA", was otherwise parsed into 12.0 / nan
+    df = pd.read_csv(summary_path, sep="\t", header=0, dtype=str,
+                     keep_default_na=False)
 
-    label_map = dict(zip(df["genome_id"], df["label"].astype(str), strict=True))
+    label_map = dict(zip(df["genome_id"], df["label"], strict=True))
     in_tree_set = set(df.loc[df["in_final_tree"] == "Yes", "genome_id"])
 
     # a swap occurred if any label differs from its genome_id

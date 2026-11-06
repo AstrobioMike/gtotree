@@ -23,6 +23,37 @@ def accession_core(acc):
     return s.split(".")[0].split("_")[-1]
 
 
+def accession_core_array(accessions):
+    """
+    `accession_core` over a whole Arrow string column/array at once, same rules
+
+    For the multi-million-row paths (liveness screening against the NCBI table,
+    exclusion over a bulk pool) where calling the scalar version per row through
+    `.to_pylist()` costs seconds and a large Python-object footprint. Nulls come back
+    as '' just like junk does.
+    """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
+
+    accessions = pc.cast(accessions, pa.string())
+
+    # fast path: when every value is a canonical NCBI accession (GCF_000005845.2), the
+    # core is just characters 4-13, and one regex check + a slice is far cheaper than
+    # the general rewrite below. Same answer either way for such values
+    canonical = pc.match_substring_regex(accessions,
+                                         pattern=r"^GC[AF]_[0-9]{9}\.[0-9]+$")
+    if len(accessions) and accessions.null_count == 0 and pc.all(canonical).as_py():
+        return pc.utf8_slice_codeunits(accessions, 4, 13)
+
+    s = pc.utf8_trim_whitespace(accessions)
+    s = pc.replace_substring_regex(s, pattern=r"^(?:RS_|GB_)", replacement="")
+    is_assembly = pc.match_substring_regex(s, pattern=r"^[Gg][Cc][AaFf]_")
+    core = pc.replace_substring_regex(s, pattern=r"\..*$", replacement="")   # split(".")[0]
+    core = pc.replace_substring_regex(core, pattern=r"^.*_", replacement="")  # split("_")[-1]
+    core = pc.if_else(pc.fill_null(is_assembly, False), core, "")
+    return pc.fill_null(core, "")
+
+
 # ---------------------------------------------------------------------------
 # taxon-name aliases
 # ---------------------------------------------------------------------------

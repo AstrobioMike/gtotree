@@ -66,7 +66,7 @@ When `-w` is used, `--derep-rank` defaults to `auto`, which dereplicates to two 
 ---
 
 # Working with many genomes
-When working with many thousands of genomes, the time the individual gene alignments take can quickly become prohibitive. First, I'd suggest considering working with [representative genomes](#consider-using-representative-genomes) as discussed above, if not doing so already. But if we are targeting greater than 1,000 genomes, GToTree by default will use the [super5](https://drive5.com/muscle5/manual/super5_algo.html) algorithm of muscle to help speed up the alignments. A message will pop up notifying you when the run starts, but if you'd like to use the regular [PPP](https://drive5.com/muscle5/manual/ppp_algo.html) muscle algorithm still despite having many sequences to align, then pass the `-X` option with no arguments to the GToTree call.
+When working with many thousands of genomes, the time the individual gene alignments take can quickly become prohibitive. First, I'd suggest considering working with [representative genomes](#consider-using-representative-genomes) as discussed above, if not doing so already. GToTree aligns with the [super5](https://drive5.com/muscle5/manual/super5_algo.html) algorithm of muscle by default, which keeps alignment times down as genome numbers grow. If you'd like to use the regular [PPP](https://drive5.com/muscle5/manual/ppp_algo.html) muscle algorithm instead, pass the `-X` option with no arguments to the GToTree call (be aware this gets slow quickly with many genomes).
 
 ---
 

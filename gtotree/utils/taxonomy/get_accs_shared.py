@@ -216,7 +216,10 @@ def derep_note(pool, rank, taxon, derep_rank):
         return None, []
 
     try:
-        effective, warnings = resolve_derep_rank(rank, derep_rank)
+        # domain-aware like the real pull (select_ref_genomes), or a eukaryotic
+        # target previews the prokaryotic `auto` rank and quotes the wrong count
+        effective, warnings = resolve_derep_rank(
+            rank, derep_rank, domain=_single_domain(pool, rank, taxon))
     except ValueError as err:
         # an explicit rank coarser than this one -- can't dereplicate to it
         return str(err), []
@@ -226,6 +229,28 @@ def derep_note(pool, rank, taxon, derep_rank):
 
     n = pool.derep_size(rank, taxon, effective)
     return f"Dereplicated at '{effective}', that would be {n:,} genome(s).", warnings
+
+
+def _single_domain(pool, rank, taxon):
+    """
+    The one domain `taxon` (at `rank`) sits in, or None if it spans several or none
+
+    Only the domain column for the taxon's rows is read
+    """
+    import pyarrow.parquet as pq  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
+
+    domain_col = RANKS[0]
+    if rank == domain_col:
+        return taxon
+    try:
+        tab = pq.read_table(pool.table_path, columns=[domain_col],
+                            filters=[(rank, "=", taxon)])
+    except Exception:
+        return None
+    domains = [d for d in pc.unique(tab.column(domain_col)).to_pylist()
+               if d and d != "NA"]
+    return domains[0] if len(domains) == 1 else None
 
 
 FILTERS_APPLIED_NOTE = " (after any specified filters)"

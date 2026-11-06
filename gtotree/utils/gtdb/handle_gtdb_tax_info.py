@@ -3,6 +3,7 @@ import pyarrow.parquet as pq # type: ignore
 import pyarrow.compute as pc # type: ignore
 
 from gtotree.utils.taxonomy.tax_ranks import RANKS, accession_core
+from gtotree.utils.misc.general import newick_safe_label_part
 from gtotree.utils.gtdb.get_gtdb_data import gtdb_data_table_path
 
 # the 7 rank columns plus the join key, read from the Parquet asset
@@ -23,14 +24,9 @@ def update_mapping_dict_with_gtdb_tax_info(args, run_data):
         if input_acc in run_data.mapping_dict:
             continue
 
-        new_label = f"{input_acc}_"
-        for rank in args.lineage.split(","):
-            if rank.lower() != "strain":
-                new_label += ranks[rank.lower()] + "_"
-
-        new_label = new_label[:-1]           # removing last underscore
-        new_label = new_label.replace(" ", "_")
-        run_data.mapping_dict[input_acc] = new_label
+        parts = [newick_safe_label_part(ranks[rank.lower()])
+                 for rank in args.lineage.split(",") if rank.lower() != "strain"]
+        run_data.mapping_dict[input_acc] = "_".join([input_acc] + parts)
 
     return run_data
 
@@ -69,19 +65,21 @@ def gtdb_lineages_for_accessions(accessions, gtdb_path=None):
     selection back to the GTDB taxonomy the pre-built SCG-sets are built from
     """
     # map each wanted accession to its numeric core for the join
-    core_to_input = {}
+    # a core can be shared by more than one input (the GCA_ and GCF_ of one assembly);
+    # each of them gets the lineage, rather than only the last one seen
+    core_to_inputs = {}
     for acc in accessions:
         core = accession_core(acc)
         if core:
-            core_to_input[core] = acc
+            core_to_inputs.setdefault(core, []).append(acc)
 
-    if not core_to_input:
+    if not core_to_inputs:
         return {}
 
     if gtdb_path is None:
         gtdb_path = gtdb_data_table_path()
 
-    wanted_cores = pa.array(list(core_to_input.keys()))
+    wanted_cores = pa.array(list(core_to_inputs.keys()))
 
     result = {}
     parquet_file = pq.ParquetFile(gtdb_path)
@@ -101,9 +99,7 @@ def gtdb_lineages_for_accessions(accessions, gtdb_path=None):
         rank_cols = {rank: matched.column(rank).to_pylist() for rank in RANKS}
 
         for i, gb_acc in enumerate(gb_matched):
-            input_acc = core_to_input.get(accession_core(gb_acc))
-            if input_acc is None:
-                continue
-            result[input_acc] = {rank: rank_cols[rank][i] for rank in RANKS}
+            for input_acc in core_to_inputs.get(accession_core(gb_acc), ()):
+                result[input_acc] = {rank: rank_cols[rank][i] for rank in RANKS}
 
     return result

@@ -169,12 +169,14 @@ def check_args(args):
             "You've specified a custom lineage (`-L`), but neither `-D`/`--add-gtdb-tax` "
             "nor `-t`/`--add-ncbi-tax` was given to say which taxonomy to use.")
 
-    if os.path.abspath(args.output_dir.rstrip("/")) == \
-            os.path.abspath(args.input_dir.rstrip("/")):
+    out_dir = os.path.realpath(args.output_dir.rstrip("/"))
+    in_dir = os.path.realpath(args.input_dir.rstrip("/"))
+    # an `-o` that CONTAINS the run is refused too, since `-F` would delete it
+    if os.path.commonpath([out_dir, in_dir]) == out_dir:
         raise UpdateHeadersError(
-            "The output directory (`-o`) is the same as the run being re-labeled "
-            "(`-i`). This program never writes into the run it reads, so please point "
-            "`-o` somewhere else.")
+            "The output directory (`-o`) is the same as, or contains, the run being "
+            "re-labeled (`-i`). This program never writes into the run it reads, so "
+            "please point `-o` somewhere else.")
 
     return args
 
@@ -204,6 +206,9 @@ def build_new_mapping_dict(args, run_data):
     nothing ever changed.
     """
     run_data.mapping_dict = {}
+    # the suffix-only `-m` lines too: check_mapping_file only reads a new file when
+    # BOTH dicts are empty, and a leftover suffix_dict also gets re-applied on top
+    run_data.suffix_dict = {}
     run_data.tax_info_dict = {}
     run_data.mapping_file_path = ""
 

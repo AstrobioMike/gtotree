@@ -184,3 +184,17 @@ class TestGenomeFilterCounts:
 
     def test_counting_a_missing_file_is_zero_not_an_error(self, tmp_path):
         assert count_fasta_records(str(tmp_path / "nope.faa")) == 0
+
+
+def test_filter_and_rename_drops_stop_characters_from_amino_acid_inputs(tmp_path):
+    # the prodigal path already strips '*'; user `-A` files kept it, so it reached
+    # the alignment as a column and counted toward `-c` lengths
+    import types
+    from gtotree.utils.misc.seqs import filter_and_rename_fasta
+    src = tmp_path / "in.faa"
+    src.write_text(">a\nMKTAYIAKQR*\n>b\nMKT*AYI\n")
+    rd = types.SimpleNamespace(ready_genome_files_dir=str(tmp_path),
+                               nucleotide_mode=False)
+    done, out, num, _nt = filter_and_rename_fasta("G", rd, str(src), full_path=True)
+    assert done and num == 2
+    assert open(out).read() == ">G_1\nMKTAYIAKQR\n>G_2\nMKTAYI\n"

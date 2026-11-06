@@ -640,3 +640,22 @@ def test_search_branches_is_style_and_symbols_is_binary(tmp_path):
     assert "g1\t1\n" in symbols
     assert "g2" not in symbols and "g3" not in symbols
     assert "g1\tbranch" in branches
+
+
+def test_search_files_keep_all_numeric_labels_as_written(tmp_path):
+    # the label column was left to pandas' type inference, so "0012" came out as the
+    # leaf "12.0" (and any "NA" label as "nan")
+    from gtotree.utils.misc.itol import generate_search_itol_files
+
+    # the whole label column numeric-looking, which is what triggers the inference
+    summary_body = ("g1\tg1.fa\tnucleotide-fasta\t0012\tNA\tYes\tNA\n"
+                    "g2\tg2.fa\tnucleotide-fasta\t0020\tNA\tNo\ttoo few SCG hits\n"
+                    "g3\tg3.fa\tnucleotide-fasta\t0030\tNA\tYes\tNA\n")
+    summary, itol_dir = _summary(tmp_path, summary_body)
+    counts = tmp_path / "run" / "pfam-hit-counts.tsv"
+    counts.write_text(_COUNTS)
+    generate_search_itol_files(str(counts), summary, itol_dir)
+
+    symbols = open(os.path.join(itol_dir, "PF00001-symbols-itol.txt")).read()
+    assert "0012\t1\n" in symbols
+    assert "12.0" not in symbols

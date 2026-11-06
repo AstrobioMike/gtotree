@@ -1,0 +1,143 @@
+name: integration
+
+# This checks things that need the internet, which are kept out of `gtt test` (which stays
+# offline) and out of the per-push build-and-test run (so ordinary pushes don't trigger it).
+#
+# What it exercises, against the live services:
+#   - `gtt data get` for the NCBI and GTDB tables, plus Pfam (the release assets
+#     GToTree hosts)
+#   - `gtt dl-ncbi-assemblies` by accession, leaving gzipped genomes
+#   - a full GToTree run mixing every input route that touches the network: NCBI
+#     accessions (`-a`, given directly), a `-w` reference-taxon pull, the downloaded
+#     gzipped genomes as a quoted pattern (`-f`), a Pfam search (`-p`), and both
+#     taxonomy labelings (`-t`, `-D`)
+#   - a GTDB-sourced `-w` pull through `get-accs-from-gtdb`
+#   - `-R` on a finished run, which must say it's complete rather than redo it
+#
+# Each check asserts on the outputs (run-data.json, the tree, the summary table), not
+# just on the exit code.
+
+on:
+  schedule:
+    - cron: "41 9 * * 1"      # Mondays 09:41 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: integration
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    # the data tables go where the conda env's activation points GToTree (its own
+    # share/ dir), so every run pulls them fresh, which is part of what's tested
+    env:
+      WORK: ${{ github.workspace }}/../gtt-work
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up miniconda
+      uses: conda-incubator/setup-miniconda@v4
+      with:
+        architecture: "x86_64"
+        channels: conda-forge,bioconda
+        channel-priority: strict
+        conda-remove-defaults: true
+        auto-update-conda: true
+
+    - name: Build conda package
+      run: |
+        conda install -n base conda-build -y
+        conda build conda-recipe --output-folder build_artifacts
+
+    - name: Create env and install
+      run: |
+        conda create -n gtotree python=3.12 -y
+        conda run -n gtotree conda config --add channels file://${PWD}/build_artifacts
+        conda run -n gtotree conda install gtotree -y
+        mkdir -p "$WORK"
+
+    - name: Offline smoke test first
+      run: cd "$WORK" && conda run -n gtotree gtt test
+
+    - name: Get NCBI, GTDB, and Pfam data
+      run: |
+        conda run -n gtotree gtt data locations check
+        conda run -n gtotree gtt data get ncbi-assembly-data
+        conda run -n gtotree gtt data get gtdb-data
+        conda run -n gtotree gtt data get pfam-data
+
+    - name: Download gzipped genomes by accession
+      run: |
+        cd "$WORK"
+        conda run -n gtotree gtt dl-ncbi-assemblies \
+            -a GCF_000005845.2 GCF_000009045.1 -f fasta -o dl
+        n=$(ls dl/*.gz | wc -l)
+        echo "downloaded $n gzipped genomes"
+        test "$n" -eq 2
+
+    - name: Full run mixing network input routes
+      run: |
+        cd "$WORK"
+        printf "PF00164\nPF00177\n" > pfams.txt
+        conda run -n gtotree gtotree \
+            -a GCF_000006945.2 GCF_000195955.2 \
+            -w Nitrospirota --derep-rank order \
+            -f "dl/*.gz" \
+            -p pfams.txt -t -D \
+            -H Bacteria -j 4 -o mixed
+        python3 - <<'EOF'
+        import json, os, sys
+        rd = json.load(open("mixed/run-files/run-data.json"))
+        accs = rd["ncbi_accs"]; fastas = rd["fasta_files"]
+        print(f"{len(accs)} accessions, {len(fastas)} fasta files")
+        problems = []
+        given = {"GCF_000006945.2", "GCF_000195955.2"}
+        dropped = [g["id"] for g in accs if g["id"] in given and g.get("removed")]
+        if dropped: problems.append(f"given accessions dropped: {dropped}")
+        if len(accs) <= len(given): problems.append("-w added no reference genomes")
+        if len(fastas) != 2 or any(g.get("removed") for g in fastas):
+            problems.append("gzipped fasta inputs not all used")
+        if not all(g.get("was_gzipped") for g in fastas):
+            problems.append("fasta inputs not recorded as gzipped")
+        tree = "mixed/mixed.tre"
+        if not (os.path.exists(tree) and os.path.getsize(tree) > 0):
+            problems.append("no tree")
+        if not os.path.isdir("mixed/pfam-search-results"):
+            problems.append("no Pfam search results")
+        for p in problems: print("FAIL:", p)
+        sys.exit(1 if problems else 0)
+        EOF
+
+    - name: Resuming a finished run reports it complete
+      run: |
+        cd "$WORK"
+        out=$(conda run -n gtotree gtotree \
+            -a GCF_000006945.2 GCF_000195955.2 -w Nitrospirota --derep-rank order \
+            -f "dl/*.gz" -p pfams.txt -t -D -H Bacteria -j 4 -o mixed -R 2>&1) || true
+        echo "$out" | tail -5
+        echo "$out" | grep -qi "already finished"
+
+    - name: GTDB-sourced reference pull
+      run: |
+        cd "$WORK"
+        conda run -n gtotree gtotree -w Nitrospirota --source gtdb --derep-rank family \
+            -H Bacteria -j 4 -o gtdb-pull -N
+        test -s gtdb-pull/aligned-SCGs.faa
+
+    - name: Keep logs from a failed run
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-logs
+        path: |
+          ${{ github.workspace }}/../gtt-work/*/gtotree-runlog.txt
+          ${{ github.workspace }}/../gtt-work/*/genomes-summary-info.tsv
+        if-no-files-found: ignore

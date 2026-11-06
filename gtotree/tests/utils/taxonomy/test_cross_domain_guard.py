@@ -413,3 +413,40 @@ class TestNcbiSectionOnEveryWantedRefTaxSurface:
         from gtotree.utils.misc.general import resolve_input_genomes
         src = inspect.getsource(resolve_input_genomes)
         assert "ncbi_section=" in src
+
+
+################################################################################
+# a name at two ranks in two domains: once -r picks the rank, the other rank's
+# domain no longer makes it cross-domain
+################################################################################
+
+_SPLIT_RECORDS = [
+    # 'Split' is an archaeal family AND a bacterial genus (like GTDB's JANQNQ01)
+    _rec("GCF_000000011.1", ("Archaea", "Aphy", "Aclass", "Aord", "Split", "Agen", "Agen sp1")),
+    _rec("GCF_000000012.1", ("Bacteria", "Bphy", "Bclass", "Bord", "Bfam", "Split", "Split sp1")),
+]
+
+
+@pytest.fixture
+def split_path(tmp_path):
+    path = tmp_path / "ncbi-split.parquet"
+    keys = ["assembly_accession"] + list(RANKS) + _EXTRA_COLS
+    cols = {k: [rec[k] for rec in _SPLIT_RECORDS] for k in keys}
+    pq.write_table(
+        pa.table({k: pa.array(v, type=pa.string()) for k, v in cols.items()}), str(path))
+    return str(path)
+
+
+class TestRankSettlesTheDomain:
+
+    def test_the_family_rank_resolves_to_archaea(self, split_path):
+        assert resolve_taxon(split_path, "Split", rank="family") == \
+            ("Split", "family", "Archaea")
+
+    def test_the_genus_rank_resolves_to_bacteria(self, split_path):
+        assert resolve_taxon(split_path, "Split", rank="genus") == \
+            ("Split", "genus", "Bacteria")
+
+    def test_a_domain_not_at_the_chosen_rank_is_rejected(self, split_path):
+        with pytest.raises(TaxonNotFound):
+            resolve_taxon(split_path, "Split", rank="family", domain="Bacteria")

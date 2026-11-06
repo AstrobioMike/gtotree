@@ -136,14 +136,20 @@ def run_hmm_search(id, run_data, inpath, outpath, args=None, pressed_base=None):
 
 
 def read_hmmer_results(inpath):
-    # col 5 is the full-sequence bit score, used to settle a gene hit by >1 SCG target
+    """
+    The --tblout rows as a DataFrame of gene_id, target_SCG, accession, evalue, score
+    """
     colnames = ["gene_id", "target_SCG", "accession", "evalue", "score"]
-    df = pd.read_csv(inpath, sep=r'\s+',
-                     comment="#", header=None,
-                     usecols=[0,2,3,4,5],
-                     names=colnames)
+    rows = []
+    with open(inpath) as fh:
+        for line in fh:
+            if line.startswith("#") or not line.strip():
+                continue
+            fields = line.split()
+            rows.append((fields[0], fields[2], fields[3],
+                         float(fields[4]), float(fields[5])))
 
-    return df
+    return pd.DataFrame(rows, columns=colnames)
 
 
 def parse_hmmer_results(inpath, run_data):

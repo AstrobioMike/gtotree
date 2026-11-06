@@ -18,14 +18,17 @@ from gtotree.main_stages.processing_genomes import (SearchPlan,
                                                     genomes_needing_processing)
 from gtotree.utils.misc.stages import GenomeRemovalStage
 
-# `prodigal` is what the nucleotide tests themselves need. The rest are what
-# `preflight_checks()` insists on before any stage runs -- the stage under test never
-# calls them, but _process() goes through preflight, so a machine without them gets
-# failures that look like real breakage instead of skips.
-REQUIRED = ["prodigal"]
-PREFLIGHT_REQUIRED = ["muscle", "trimal", "FastTreeMP"]
+# pyrodigal is what the nucleotide tests themselves need (gene calling is in-process).
+# The rest are what `preflight_checks()` insists on before any stage runs -- the stage
+# under test never calls them, but _process() goes through preflight, so a machine
+# without them gets failures that look like real breakage instead of skips.
+PREFLIGHT_REQUIRED = ["muscle", "trimal", "VeryFastTree"]
 
-_missing = [b for b in REQUIRED if shutil.which(b) is None]
+try:
+    import pyrodigal  # type: ignore  # noqa: F401
+    _missing = []
+except ImportError:
+    _missing = ["pyrodigal"]
 _missing_preflight = [b for b in PREFLIGHT_REQUIRED if shutil.which(b) is None]
 
 needs_preflight_deps = pytest.mark.skipif(
@@ -127,9 +130,151 @@ def test_running_the_stage_again_skips_everything_and_keeps_outputs_complete(tmp
     assert len([ln for ln in first.splitlines() if ln.strip()]) == 5  # header + 4
 
 
+@needs_preflight_deps
+def test_a_resume_after_losing_per_genome_results_reprocesses_those_genomes(tmp_path):
+    # with the per-genome files gone (scratch --tmp-dir wiped), the rebuild skipped
+    # the genome but its flags still said done, so its hits silently vanished
+    import shutil
+    from gtotree.main_stages.processing_genomes import process_genomes
+    from gtotree.utils.misc.stages import PipelineStage
+
+    args, run_data = _process(tmp_path, "-A", AA_GENOMES, MOCK_HMM)
+    table = os.path.join(run_data.output_dir, "SCG-hit-counts.tsv")
+    first = open(table).read()
+    counts = {s.id: s.num_genomes_with_hit for s in run_data.SCG_targets}
+
+    shutil.rmtree(os.path.join(run_data.hmm_results_dir, "mock-2"))
+    run_data = process_genomes(args, run_data)
+
+    assert open(table).read() == first
+    assert {s.id: s.num_genomes_with_hit for s in run_data.SCG_targets} == counts
+    assert run_data.stage_is_complete(PipelineStage.PROCESS_GENOMES)
+
+
+@needs_preflight_deps
+def test_a_resume_does_not_rebuild_counts_without_genomes_removed_later(tmp_path):
+    # re-running the combine on a resume dropped genomes that `-G` removed AFTER this
+    # stage, so the SCG counts and SCG-hit-counts.tsv drifted from an uninterrupted run
+    from gtotree.main_stages.processing_genomes import process_genomes
+    from gtotree.utils.misc.stages import GenomeRemovalStage
+
+    args, run_data = _process(tmp_path, "-A", AA_GENOMES, MOCK_HMM)
+    table = os.path.join(run_data.output_dir, "SCG-hit-counts.tsv")
+    first = open(table).read()
+    counts = {s.id: s.num_genomes_with_hit for s in run_data.SCG_targets}
+
+    run_data.all_input_genomes[0].mark_removed("too few unique SCG hits",
+                                               GenomeRemovalStage.SCG_HIT_FILTER)
+    run_data = process_genomes(args, run_data)
+
+    assert open(table).read() == first
+    assert {s.id: s.num_genomes_with_hit for s in run_data.SCG_targets} == counts
+
+
+@needs_preflight_deps
+def test_a_stop_partway_through_a_pool_resumes_from_the_genomes_already_done(
+        tmp_path, monkeypatch):
+    # run-data used to be saved only once a whole source's pool finished, so a run
+    # stopped partway through (e.g. hours into 20k genomes) redid every genome
+    import gtotree.main_stages.processing_genomes as pg
+    from gtotree.utils.misc.general import read_run_data
+
+    # the search results are the last thing applied for a genome, so stopping right
+    # after the second one leaves exactly two genomes fully done
+    real_apply = pg._apply_searches
+    applied = []
+
+    def stop_after_two(gd, searches, run_data, plan):
+        real_apply(gd, searches, run_data, plan)
+        applied.append(gd.id)
+        if len(applied) == 2:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(pg, "_apply_searches", stop_after_two)
+    with pytest.raises(KeyboardInterrupt):
+        _process(tmp_path, "-A", AA_GENOMES, MOCK_HMM, extra=["-j", "1"])
+
+    saved = read_run_data(str(tmp_path / "out" / "run-files" / "run-data.json"))
+    done = sorted(gd.id for gd in saved.amino_acid_files if gd.hmm_search_done)
+    assert done == sorted(applied)
+
+    monkeypatch.setattr(pg, "_apply_searches", real_apply)
+    redone = []
+    real_worker = pg._process_one_amino_acid_file
+
+    def counting_worker(gd, run_data):
+        redone.append(gd.id)
+        return real_worker(gd, run_data)
+
+    monkeypatch.setattr(pg, "_process_one_amino_acid_file", counting_worker)
+    _, run_data = _process(tmp_path, "-A", AA_GENOMES, MOCK_HMM, extra=["-R"])
+    assert sorted(redone) == sorted(set(f"mock-{i}" for i in range(1, 5)) - set(applied))
+    assert all(gd.hmm_search_done for gd in run_data.all_input_genomes)
+
+
+@needs_preflight_deps
+def test_a_resume_with_nothing_saved_starts_fresh_and_honors_tmp_dir(tmp_path):
+    from gtotree.cli.parser import parser
+    from gtotree.utils.misc.preflight_checks import preflight_checks
+    from gtotree.utils.misc.context import log_file_var
+
+    listing = tmp_path / "inputs.txt"
+    listing.write_text("\n".join(str(p) for p in AA_GENOMES) + "\n")
+    scratch = tmp_path / "scratch"
+    argv = ["-A", str(listing), "-H", str(MOCK_HMM), "-o", str(tmp_path / "out"),
+            "-R", "--tmp-dir", str(scratch)]
+    token = log_file_var.set(log_file_var.get())
+    try:
+        args, run_data = preflight_checks(parser().parse_args(argv))
+    finally:
+        log_file_var.reset(token)
+    assert os.path.dirname(run_data.tmp_dir) == str(scratch)
+    assert args.tmp_dir == run_data.tmp_dir
+
+
+@needs_preflight_deps
+def test_gzipped_genomes_are_read_in_place_whatever_they_are_named(tmp_path):
+    # gzipped inputs used to be decompressed to a scratch copy first, chosen by a
+    # `.gz` suffix, so a gzipped file without one was read as text and dropped
+    import gzip
+    inputs = []
+    for i, name in enumerate(["mock-1.faa.gz", "mock-2.faa"], start=1):
+        dest = tmp_path / name
+        with open(DATA_DIR / f"mock-{i}.faa", "rb") as src, gzip.open(dest, "wb") as out:
+            out.write(src.read())
+        inputs.append(dest)
+    inputs += AA_GENOMES[2:]
+
+    _, run_data = _process(tmp_path, "-A", inputs, MOCK_HMM, extra=["--keep-working-dir"])
+
+    assert not [gd.id for gd in run_data.all_input_genomes if gd.removed]
+    assert all(gd.hmm_search_done for gd in run_data.all_input_genomes)
+    gz = {gd.id: gd.was_gzipped for gd in run_data.all_input_genomes}
+    assert gz == {"mock-1": True, "mock-2": True, "mock-3": False, "mock-4": False}
+    assert os.listdir(run_data.AA_processing_dir) == []
+
+
 # ---------------------------------------------------------------------------
 # nucleotide mode
 # ---------------------------------------------------------------------------
+
+@needs_preflight_deps
+@pytest.mark.skipif(bool(_missing), reason=f"missing binaries: {_missing}")
+def test_gene_calling_intermediates_are_not_left_behind(tmp_path, nt_genomes, nt_hmm):
+    # prodigal's per-genome protein/CDS files (and raw NCBI downloads) were never
+    # cleaned up, building up ~5 MB a genome in the tmp dir for the whole run
+    _, run_data = _process(tmp_path, "-f", nt_genomes, nt_hmm)
+    assert os.listdir(run_data.fasta_processing_dir) == []
+
+
+@needs_preflight_deps
+@pytest.mark.skipif(bool(_missing), reason=f"missing binaries: {_missing}")
+def test_keep_working_dir_keeps_the_gene_calling_intermediates(tmp_path, nt_genomes,
+                                                               nt_hmm):
+    _, run_data = _process(tmp_path, "-f", nt_genomes, nt_hmm,
+                           extra=["--keep-working-dir"])
+    assert os.listdir(run_data.fasta_processing_dir)
+
 
 @needs_preflight_deps
 @pytest.mark.skipif(bool(_missing), reason=f"missing binaries: {_missing}")

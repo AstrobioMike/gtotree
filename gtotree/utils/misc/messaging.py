@@ -446,19 +446,28 @@ def input_genome_source_lines(args, run_data, indent=INPUT_SOURCE_INDENT):
         lines.extend(_wanted_ref_tax_detail_lines(selection, sub_indent))
 
     if args.ncbi_accessions:
-        lines.append(f"{indent}- NCBI accessions listed in {args.ncbi_accessions} "
+        lines.append(f"{indent}- NCBI accessions {_input_origin(args.ncbi_accessions)} "
                      f"({len(run_data.get_user_provided_ncbi_accs()):,} genomes)")
     if args.fasta_files:
-        lines.append(f"{indent}- Fasta files listed in {args.fasta_files} "
+        lines.append(f"{indent}- Fasta files {_input_origin(args.fasta_files)} "
                      f"({len(run_data.get_input_fasta_ids()):,} genomes)")
     if args.amino_acid_files:
-        lines.append(f"{indent}- Amino-acid files listed in {args.amino_acid_files} "
+        lines.append(f"{indent}- Amino-acid files {_input_origin(args.amino_acid_files)} "
                      f"({len(run_data.get_input_amino_acid_ids()):,} genomes)")
     if args.genbank_files:
-        lines.append(f"{indent}- Genbank files listed in {args.genbank_files} "
+        lines.append(f"{indent}- Genbank files {_input_origin(args.genbank_files)} "
                      f"({len(run_data.get_input_genbank_ids()):,} genomes)")
 
     return lines
+
+
+def _input_origin(value):
+    """
+    'listed in X', 'given directly', or both, for one genome-input arg (a plain string
+    is a list file, the form some callers still pass)
+    """
+    describe = getattr(value, "describe", None)
+    return describe() if describe else f"listed in {value}"
 
 
 def total_input_genomes_line(run_data, indent=TOTAL_LINE_INDENT):
@@ -628,7 +637,7 @@ def check_and_report_any_changed_default_behavior(args, run_data):
     if args.lineage != "domain,phylum,class,order,family,genus,species":
         lines.append(f"Lineage info added to labels will be: \"{args.lineage}\"")
 
-    if args.tree_program != "FastTreeMP":
+    if args.tree_program != "VeryFastTree":
         lines.append(f"The treeing program used will be: \"{args.tree_program}\"")
 
     if args.best_hit_mode:
@@ -650,7 +659,7 @@ def check_and_report_any_changed_default_behavior(args, run_data):
         lines.append(f"The number of threads used for `muscle` calls will be: {args.num_muscle_threads}")
 
     if args.no_super5:
-        lines.append("The 'super5' muscle algorithm will not be used even with greater than 500 input genomes")
+        lines.append("Gene alignments will use muscle's standard '-align' (PPP) algorithm rather than 'super5', due to the `-X` flag being provided")
 
     if args.keep_gene_alignments:
         lines.append("Individual protein-alignment files will retained, due to the `-k` flag being provided")
@@ -670,24 +679,6 @@ def check_and_report_any_changed_default_behavior(args, run_data):
     report_message("  Other options set:")
     for line in lines:
         print(f"      - {line}")
-
-
-def many_genomes_notice(total_input_genomes):
-    return (
-    f"""    We seem to be aiming to work with {total_input_genomes:,} genomes. This is quite a bit, and
-    the time individual gene alignments can take can quickly become
-    prohibitive with many genomes like this.
-
-    By default, GToTree is going to use the 'super5' muscle algorithm to help
-    speed up the alignments for this run. If you don't want this to happen,
-    you should cancel this run with `ctrl + c` now, and then add the `-X` flag
-    to the GToTree command and re-run it.
-
-    More info can be found here:
-      github.com/AstrobioMike/GToTree/wiki/things-to-consider
-
-    We will wait 30 seconds before continuing with our regularly scheduled program :)"""
-)
 
 
 def few_genomes_notice(total_input_genomes, args):

@@ -49,12 +49,27 @@ def get_additional_pfam_targets(run_data):
 
     acc_to_name = _load_pfam_info(info_path)
 
-    # read requested targets, keyed by version-less accession
+    # read requested targets, grouped by version-less accession: the same Pfam can be
+    # listed under more than one spelling (PF00001 and PF00001.3), and each spelling
+    # used to get its own entry while only the last was ever matched, so the others
+    # were reported as failed even though the profile was pulled
     pfam_dict = {}            # key: input_id (as given), value: pulled full acc or None
-    wanted_by_core = {}       # key: version-less acc, value: input_id
+    inputs_by_core = {}       # key: version-less acc, value: [input_ids, in listed order]
     for input_id in read_single_column_file(run_data.target_pfams_file):
+        if input_id in pfam_dict:
+            continue
         pfam_dict[input_id] = None
-        wanted_by_core[input_id.split(".")[0]] = input_id
+        inputs_by_core.setdefault(input_id.split(".")[0], []).append(input_id)
+
+    _report_duplicate_pfam_targets(inputs_by_core)
+
+    # for profiles with no accession set, matched by NAME via the info table; built
+    # once rather than scanning every wanted target for each of ~20k profiles
+    core_by_name = {}
+    for core in inputs_by_core:
+        name = acc_to_name.get(core)
+        if name:
+            core_by_name.setdefault(name, core)
 
     profiles_dir = f"{run_data.pfam_results_dir}/target-pfam-profiles"
     os.makedirs(profiles_dir, exist_ok=True)
@@ -64,6 +79,7 @@ def get_additional_pfam_targets(run_data):
 
     found_pfam_targets = []
     found_pfam_paths = []
+    pulled = set()
 
     with spinner("Collecting Pfam targets...", "", clear_on_done=True):
         # single streaming pass over the master HMM, pulling only wanted profiles
@@ -73,24 +89,23 @@ def get_additional_pfam_targets(run_data):
                 core = acc.split(".")[0]
 
                 # fall back to matching on NAME if accession isn't set on the profile
-                if core not in wanted_by_core:
+                if core not in inputs_by_core:
                     name = decode_pyhmmer_text(hmm.name) or ""
-                    # map a requested name-less acc via the info table's name, if needed
-                    core = next((c for c, iid in wanted_by_core.items()
-                                 if acc_to_name.get(c) == name), core)
+                    core = core_by_name.get(name, core)
 
-                if core not in wanted_by_core:
+                if core not in inputs_by_core:
                     continue
 
-                input_id = wanted_by_core[core]
-                if pfam_dict[input_id] is not None:
+                if core in pulled:
                     continue  # already pulled (guards against dup accessions)
 
                 out_path = f"{profiles_dir}/{core}.hmm"
                 with open(out_path, "wb") as out_fh:
                     hmm.write(out_fh)
 
-                pfam_dict[input_id] = acc if acc else core
+                for input_id in inputs_by_core[core]:
+                    pfam_dict[input_id] = acc if acc else core
+                pulled.add(core)
                 found_pfam_targets.append(core)
                 found_pfam_paths.append(out_path)
 
@@ -114,6 +129,18 @@ def write_out_failed_pfams(run_data):
         with open(run_data.pfam_results_dir + "/failed-pfam-targets.txt", "w") as failed_pfams_file:
             for entry in run_data.failed_pfam_targets:
                 failed_pfams_file.write(entry + "\n")
+
+
+def _report_duplicate_pfam_targets(inputs_by_core):
+    """
+    Say once, for each Pfam listed more than once under different spellings, that
+    it's only searched once
+    """
+    for core, input_ids in inputs_by_core.items():
+        if len(input_ids) > 1:
+            wprint(color_text(
+                f"    Note: {', '.join(input_ids)} are all the same Pfam ({core}), so "
+                "it will be searched for just once.", "yellow"))
 
 
 def write_requested_and_pulled_pfams(run_data, pfam_dict):

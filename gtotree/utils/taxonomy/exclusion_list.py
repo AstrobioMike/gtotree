@@ -10,7 +10,7 @@ The list only ever constrains genomes selected BY TAXONOMY. Accessions a user na
 directly (`-a`) are always used as provided.
 """
 
-from gtotree.utils.taxonomy.tax_ranks import accession_core
+from gtotree.utils.taxonomy.tax_ranks import accession_core, accession_core_array
 
 
 def exclusion_list_help(taxon_flag="-w"):
@@ -78,12 +78,14 @@ def filter_table_by_exclusion(table, acc_col, exclude_cores):
     if not exclude_cores:
         return table, 0
 
-    accs = table.column(acc_col).to_pylist()
-    keep = [i for i, a in enumerate(accs)
-            if accession_core(a or "") not in exclude_cores]
-    num_excluded = table.num_rows - len(keep)
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
+
+    excluded = pc.is_in(accession_core_array(table.column(acc_col)),
+                        value_set=pa.array(sorted(exclude_cores), type=pa.string()))
+    num_excluded = pc.sum(excluded).as_py() or 0
     if num_excluded:
-        table = table.take(keep)
+        table = table.filter(pc.invert(excluded))
     return table, num_excluded
 
 

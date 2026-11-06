@@ -119,7 +119,6 @@ class TestVersionGetters:
     GETTERS = {
         "muscle": ("get_muscle_version", "5.1.linux64"),
         "trimal": ("get_trimal_version", "v1.4.rev15"),
-        "prodigal": ("get_prodigal_version", "v2.6.3"),
         "fasttree": ("get_fasttree_version", "2.1.11"),
         "veryfasttree": ("get_veryfasttree_version", "4.0.3"),
         "iqtree": ("get_iqtree_version", "2.2.0"),
@@ -250,3 +249,8 @@ class TestGenerateCitationsInfo:
 
         assert CitationsInfo.prodigal in text
         assert CitationsInfo.muscle in text
+
+
+def test_the_pyrodigal_version_comes_from_the_installed_package():
+    from importlib.metadata import version
+    assert citations.get_pyrodigal_version() == f"v{version('pyrodigal')}"

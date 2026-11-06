@@ -1,3 +1,4 @@
+import os
 import tempfile
 
 from gtotree.utils.misc.messaging import (report_processing_stage,
@@ -136,6 +137,28 @@ def _drop_genome_files(status, run_data):
             remove_file_if_exists(path)
 
 
+def _intermediate_paths(gd, run_data):
+    """
+    Per-genome scratch files from download / gene-calling that nothing reads once
+    filter_and_rename_fasta has written the ready copies (a resume reprocesses from
+    the input, never from these)
+    """
+    from gtotree.utils.misc.general import (SOURCE_ACCESSION, SOURCE_GENBANK,
+                                            SOURCE_FASTA)
+    if gd.source == SOURCE_ACCESSION:
+        d = run_data.ncbi_processing_dir
+        return [f"{d}/{gd.id}_genomic.fna", f"{d}/{gd.id}_protein.faa",
+                f"{d}/{gd.id}_cds.fasta"]
+    if gd.source == SOURCE_GENBANK:
+        d = run_data.genbank_processing_dir
+        return [f"{d}/{gd.id}.fasta", f"{d}/{gd.id}_protein.faa",
+                f"{d}/{gd.id}_cds.fasta"]
+    if gd.source == SOURCE_FASTA:
+        d = run_data.fasta_processing_dir
+        return [f"{d}/{gd.id}_protein.faa", f"{d}/{gd.id}_cds.fasta"]
+    return []
+
+
 def _run_searches(genome, run_data, plan, status):
     """
     Run every configured search for one genome
@@ -190,6 +213,11 @@ def _fused(preprocess_worker, preprocess_apply, plan):
     def worker(gd, run_data):
         try:
             status = preprocess_worker(gd, run_data)
+            if not plan.keep_genome_files:
+                # these used to pile up for the whole run (~5 MB a genome)
+                for path in _intermediate_paths(gd, run_data):
+                    if path:
+                        remove_file_if_exists(path)
             if status.get("done"):
                 status["searches"] = _run_searches(gd, run_data, plan, status)
                 if not plan.keep_genome_files:
@@ -211,11 +239,55 @@ def _fused(preprocess_worker, preprocess_apply, plan):
     return worker, apply_result
 
 
+def reset_genomes_missing_SCG_artifacts(run_data):
+    """
+    Un-mark any genome whose flags say its SCG search is done but whose per-genome
+    artifacts are gone, so it gets processed again. Returns how many were reset.
+
+    The combined outputs are rebuilt from those files, and a genome missing them was
+    silently skipped there while keeping its "done" flags -- e.g. a `--tmp-dir` on
+    node-local scratch wiped between HPC jobs before `-R` -- leaving every SCG looking
+    like "no hits in any genome" and genomes removed for the wrong reason.
+    """
+    ext = run_data.general_ext
+    n_reset = 0
+    for gd in run_data.all_input_genomes:
+        if gd.removed or not gd.hmm_search_done:
+            continue
+        genome_dir = f"{run_data.hmm_results_dir}/{gd.id}"
+        if (os.path.isfile(f"{genome_dir}/SCG-hit-counts.txt")
+                and os.path.isfile(f"{genome_dir}/SCG-hits{ext}")):
+            continue
+        gd.mark_processing_done(False)
+        gd.mark_hmm_search_done(False)
+        n_reset += 1
+    return n_reset
+
+
+def _save_progress(run_data):
+    """
+    Periodic save during the processing pools: per-genome results are written
+    atomically as they finish, so persisting the flags is all a resume needs to skip
+    the genomes already done (it used to save only once each source's pool ended)
+    """
+    if run_data.run_data_path:
+        write_run_data(run_data)
+
+
 def process_genomes(args, run_data):
     """
     Download/preprocess and search every input genome, one genome per worker call
     """
     run_data, plan = build_search_plan(args, run_data)
+
+    # saved before any genome is touched, so even a run stopped during its first pool
+    # leaves the state (incl. the tmp dir in use) that `-R` needs to pick it back up
+    _save_progress(run_data)
+
+    if plan.do_scg and reset_genomes_missing_SCG_artifacts(run_data):
+        # everything after this stage was built from the per-genome results, so it
+        # can't be trusted once some of them have to be regenerated
+        run_data.invalidate_stages_from(PipelineStage.PROCESS_GENOMES)
 
     # hmmpress the profile sets once for the whole run rather than re-parsing the HMM
     # text for every genome. The pressed files are scratch, so they live in a temp dir
@@ -266,7 +338,8 @@ def _process_ncbi(args, run_data, plan):
             return _process_one_ncbi_accession(acc_gd, rd, base_link_map)
 
         worker, apply_result = _fused(preprocess, _apply_ncbi_accession_status, plan)
-        run_data = run_pooled_stage(to_process, worker, apply_result, args, run_data)
+        run_data = run_pooled_stage(to_process, worker, apply_result, args, run_data,
+                                    checkpoint=_save_progress)
         write_removed_genomes_report(run_data)
         write_run_data(run_data)
 
@@ -284,7 +357,8 @@ def _process_genbank(args, run_data, plan):
 
     if to_process:
         worker, apply_result = _fused(_process_one_genbank_file, _apply_genbank_status, plan)
-        run_data = run_pooled_stage(to_process, worker, apply_result, args, run_data)
+        run_data = run_pooled_stage(to_process, worker, apply_result, args, run_data,
+                                    checkpoint=_save_progress)
         write_run_data(run_data)
         write_removed_genomes_report(run_data)
 
@@ -302,7 +376,8 @@ def _process_fasta(args, run_data, plan):
 
     if to_process:
         worker, apply_result = _fused(_process_one_fasta_file, _apply_fasta_status, plan)
-        run_data = run_pooled_stage(to_process, worker, apply_result, args, run_data)
+        run_data = run_pooled_stage(to_process, worker, apply_result, args, run_data,
+                                    checkpoint=_save_progress)
         write_run_data(run_data)
         write_removed_genomes_report(run_data)
 
@@ -321,7 +396,8 @@ def _process_amino_acid(args, run_data, plan):
     if to_process:
         worker, apply_result = _fused(_process_one_amino_acid_file,
                                       _apply_amino_acid_status, plan)
-        run_data = run_pooled_stage(to_process, worker, apply_result, args, run_data)
+        run_data = run_pooled_stage(to_process, worker, apply_result, args, run_data,
+                                    checkpoint=_save_progress)
         write_run_data(run_data)
         write_removed_genomes_report(run_data)
 
@@ -361,7 +437,11 @@ def _finalize(args, run_data, plan):
         run_data.additional_ko_searching_done = True
         report_ko_searching_update(run_data)
 
-    if plan.do_scg:
+    # Already rebuilt by the run that completed this stage. Rebuilding again on a
+    # resume isn't neutral: genomes removed LATER (by `-G`) are filtered out of the
+    # rebuild, so SCG-hit-counts.tsv and the per-SCG counts would shift away from what
+    # an uninterrupted run reports
+    if plan.do_scg and not run_data.stage_is_complete(PipelineStage.PROCESS_GENOMES):
         phase_stats.checkpoint("combining: before SCG rebuild")
         run_data = rebuild_combined_SCG_outputs(run_data)
         phase_stats.checkpoint("combining: after SCG rebuild")

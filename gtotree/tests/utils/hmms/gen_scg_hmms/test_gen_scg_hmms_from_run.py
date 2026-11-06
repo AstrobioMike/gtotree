@@ -255,6 +255,14 @@ def test_from_run_refuses_writing_over_itself(tmp_path):
         cli.check_args(_parse("--from-run", str(tmp_path), "-o", str(tmp_path) + "/"))
 
 
+def test_from_run_refuses_an_output_dir_that_contains_it(tmp_path):
+    # with `-F`, clearing such an `-o` deleted the run being read
+    run = tmp_path / "runs" / "scan"
+    run.mkdir(parents=True)
+    with pytest.raises(GenSCGHMMsError, match="different directory"):
+        cli.check_args(_parse("--from-run", str(run), "-o", str(tmp_path / "runs")))
+
+
 def test_max_hmms_default_and_bounds():
     assert _parse("-w", "X").max_hmms == 250
     cli.check_args(_parse("-w", "X", "--max-hmms", "0"))

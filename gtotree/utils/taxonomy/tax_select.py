@@ -7,12 +7,14 @@ a (canonical, rank) pair and pull the rows under it from the hosted Parquet asse
 differs between sources; that difference is isolated in SourceSpec / SOURCES.
 """
 
+import os
 import pyarrow.compute as pc # type: ignore
 import pyarrow.parquet as pq # type: ignore
 
 import pyarrow as pa # type: ignore
 
 from gtotree.utils.taxonomy.tax_ranks import (RANKS, NA, REFERENCE_VALUE, accession_core,
+                                              accession_core_array,
                                               normalize_taxon_name, rank_index)
 
 
@@ -109,18 +111,38 @@ def find_ranks_for_taxon(path, taxon):
     canonical = None
     found = []
     for rank in RANKS:
-        col = pq.read_table(path, columns=[rank]).column(rank)
-        uniq = pc.unique(col).to_pylist()
-        for name in uniq:
-            if name is not None and name != NA and name.lower() == target:
-                canonical = name
-                found.append(rank)
-                break
+        name = _rank_names(path, rank).get(target)
+        if name is not None:
+            canonical = name
+            found.append(rank)
     if canonical is None:
         raise TaxonNotFound(f"'{taxon}' doesn't exist at any rank in this source")
 
     domains = _domains_for_taxon(path, canonical, found)
     return canonical, found, domains
+
+
+_RANK_NAMES_CACHE = {}
+
+
+def _rank_names(path, rank):
+    """
+    {lowercased name: name} for one rank's distinct assigned names, keeping the
+    first-seen spelling when two differ only in case. Cached per (path, size,
+    mtime): reading and lowercasing a rank column is the slow part of resolving a
+    taxon, and a run resolves one per `-w` taxon (and again for each size check)
+    """
+    st = os.stat(path)
+    key = (os.path.abspath(path), st.st_size, st.st_mtime_ns, rank)
+    names = _RANK_NAMES_CACHE.get(key)
+    if names is None:
+        names = {}
+        uniq = pc.unique(pq.read_table(path, columns=[rank]).column(rank))
+        for name in uniq.to_pylist():
+            if name is not None and name != NA:
+                names.setdefault(name.lower(), name)
+        _RANK_NAMES_CACHE[key] = names
+    return names
 
 
 def _domains_for_taxon(path, canonical, ranks):
@@ -176,6 +198,12 @@ def resolve_taxon(path, taxon, rank=None, domain=None):
         raise AmbiguousTaxon(canonical, found)
     else:
         resolved_rank = found[0]
+
+    # `domains` spans every rank the name occurs at. Once `-r` has picked one of
+    # several, only that rank's domains matter: e.g. GTDB's JANQNQ01 is an archaeal
+    # family and a bacterial genus, and `-r family` already says which is meant
+    if len(found) > 1:
+        domains = _domains_for_taxon(path, canonical, [resolved_rank])
 
     resolved_domain = _resolve_domain_choice(canonical, domains, domain)
 
@@ -237,6 +265,19 @@ def assigned_mask(col, assigned=True):
     return is_assigned if assigned else pc.invert(is_assigned)
 
 
+def rep_predicate(spec, reps_only):
+    """
+    The (column, value) representatives predicate `reps_only` asks for, or None
+
+    True -> the source's default predicate; a 2-tuple -> used as given; falsy -> None
+    """
+    if not reps_only:
+        return None
+    if isinstance(reps_only, tuple):
+        return reps_only
+    return spec.rep_filter
+
+
 def select(path, source, rank, taxon, reps_only=False, columns=None,
            accession_prefixes=None, assembly_levels=None, domain=None):
     """
@@ -246,13 +287,19 @@ def select(path, source, rank, taxon, reps_only=False, columns=None,
     name is shared across domains (e.g. the genus `Bacillus`) and the caller has
     resolved which domain is wanted. Ignored when the target rank IS domain (the rank
     filter already pins it).
+
+    `reps_only` is normally a bool (True -> the source's own representatives
+    predicate), but can also be an explicit `(column, value)` predicate, for sources
+    with more than one notion of "representative" (GTDB: its own species reps vs
+    RefSeq reference genomes, see `rep_predicate`)
     """
     spec = SOURCES[source]
     filters = [(rank, "=", taxon)]
     if domain and rank != RANKS[0]:
         filters.append((RANKS[0], "=", domain))
-    if reps_only:
-        filters.append((spec.rep_filter[0], "=", spec.rep_filter[1]))
+    rep = rep_predicate(spec, reps_only)
+    if rep:
+        filters.append((rep[0], "=", rep[1]))
     if assembly_levels and spec.level_col:
         filters.append((spec.level_col, "in", set(assembly_levels)))
 
@@ -353,12 +400,13 @@ def diagnose_empty_pool(path, source, rank, taxon, domain=None, reps_only=False,
     active = {
         "assembly_levels": assembly_levels or None,
         "accession_prefixes": accession_prefixes or None,
-        "reps_only": bool(reps_only) or None,
+        "reps_only": reps_only or None,
     }
 
     def count(**overrides):
         kwargs = {
-            "reps_only": bool(active["reps_only"]) and overrides.get("reps_only", True),
+            "reps_only": ((active["reps_only"] or False)
+                          if overrides.get("reps_only", True) else False),
             "accession_prefixes": (active["accession_prefixes"]
                                    if overrides.get("accession_prefixes", True) else None),
             "assembly_levels": (active["assembly_levels"]
@@ -379,7 +427,7 @@ def diagnose_empty_pool(path, source, rank, taxon, domain=None, reps_only=False,
     if culprits == ["assembly_levels"]:
         present_levels = present_assembly_levels(
             path, source, rank, taxon, domain=domain,
-            reps_only=bool(active["reps_only"]),
+            reps_only=active["reps_only"] or False,
             accession_prefixes=active["accession_prefixes"])
 
     return n_unfiltered, culprits, present_levels
@@ -389,12 +437,50 @@ def diagnose_empty_pool(path, source, rank, taxon, domain=None, reps_only=False,
 # liveness screening (suppressed / removed / version-drifted assemblies)
 # ---------------------------------------------------------------------------
 
+_LIVE_CORES_CACHE = {}
+
+
 def live_accession_cores(ncbi_table_path):
     """
-    The set of assembly core accs currently present in the NCBI assembly summary
+    The assembly core accs currently present in the NCBI assembly summary, as a unique
+    Arrow array (for `pc.is_in`)
 
     NCBI drops suppressed/removed assemblies from the assembly summary files, so
     ABSENCE == suppressed / removed. GTDB is a snapshot and can still have them
+
+    Computed in Arrow and cached per (path, size, mtime): this used to build a Python
+    set of all ~4.4M cores (~1 GB, ~9 s) on every call, and `select_all_domains` and
+    multi-taxon `-w` runs call it once per domain/taxon
     """
-    tab = pq.read_table(ncbi_table_path, columns=["assembly_accession"])
-    return {accession_core(a) for a in tab.column("assembly_accession").to_pylist() if a}
+    st = os.stat(ncbi_table_path)
+    key = (os.path.abspath(ncbi_table_path), st.st_size, st.st_mtime_ns)
+    cached = _LIVE_CORES_CACHE.get(key)
+    if cached is None:
+        col = pq.read_table(ncbi_table_path,
+                            columns=["assembly_accession"]).column("assembly_accession")
+        # the scalar version skipped empty/null accessions entirely
+        col = pc.filter(col, pc.fill_null(pc.not_equal(col, ""), False))
+        cached = pc.unique(accession_core_array(col))
+        _LIVE_CORES_CACHE.clear()
+        _LIVE_CORES_CACHE[key] = cached
+    return cached
+
+
+def live_mask(accessions, live_cores):
+    """
+    Boolean mask: which `accessions` are still live at NCBI (non-empty, and their
+    core is among `live_cores` from `live_accession_cores`)
+    """
+    present = pc.fill_null(pc.not_equal(accessions, ""), False)
+    return pc.and_(present, pc.is_in(accession_core_array(accessions),
+                                     value_set=live_cores))
+
+
+def filter_table_by_liveness(tab, acc_col, ncbi_table_path):
+    """
+    Drop rows whose assembly is no longer live at NCBI. Returns (kept, num_dropped)
+    """
+    before = tab.num_rows
+    tab = tab.filter(live_mask(tab.column(acc_col),
+                               live_accession_cores(ncbi_table_path)))
+    return tab, before - tab.num_rows

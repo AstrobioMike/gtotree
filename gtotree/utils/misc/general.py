@@ -1,6 +1,8 @@
 import os
+import re
 import sys
 import gzip
+import io
 import shutil
 import json
 import time
@@ -9,6 +11,7 @@ from typing import List
 from tqdm import tqdm # type: ignore
 import urllib.request
 import urllib.error
+import http.client
 import pyarrow as pa # type: ignore
 from datetime import datetime
 from gtotree.utils.misc.messaging import (report_message, color_text, wprint)
@@ -144,8 +147,10 @@ def download_with_tqdm(url, target, filename=None, leave=True,
             time.sleep(retry_wait)
             continue
 
-        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as err:
-            # transient network failure: wait, then retry
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError,
+                http.client.HTTPException) as err:
+            # transient network failure: wait, then retry. HTTPException covers
+            # IncompleteRead (a chunked body cut short), which is none of the others
             last_err = err
             if is_final:
                 raise
@@ -215,8 +220,11 @@ def _stream_once(url, filename, desc, leave, floor_bytes_per_s,
                         if rate < floor_bytes_per_s:
                             bar.close()
                             raise _TooSlow(rate / (1024 * 1024))
-            if total is not None and bar.n < total:
-                bar.update(total - bar.n)
+            if total is not None and downloaded < total:
+                # the connection closed early: a short body is a failed download,
+                # not a finished one, so it goes back to the retry loop
+                raise ConnectionError(
+                    f"download truncated ({downloaded:,} of {total:,} bytes)")
         os.replace(tmp, filename)
     except BaseException:
         # BaseException so Ctrl-C (KeyboardInterrupt) also cleans up the partial
@@ -630,7 +638,10 @@ class RunData:
     def merge_wanted_ref_tax_accessions(self, accessions, taxon=None) -> int:
         """
         Fold --wanted-ref-tax (-w) accessions into the NCBI-accession input pool,
-        skipping any already provided by the user by accession id.
+        skipping any assembly already in it. Matched on the accession core, not the
+        exact string: GTDB hands back GCA_ accessions, and a user's `-a` list is often
+        the GCF_ (or another version) of the same assembly, which used to put the same
+        genome in the tree twice. The accession already present (the user's) is kept.
         Order is preserved: existing accs first, then the new -w ones in the order
         the taxonomy core returned them. Refreshes all_input_genomes and returns the
         number actually added.
@@ -639,16 +650,21 @@ class RunData:
         the dedupe is also what keeps two taxa that share a genus from each keeping a
         copy of the same accession
         """
+        from gtotree.utils.taxonomy.tax_ranks import accession_core
         existing = {gd.id for gd in self.ncbi_accs}
+        existing_cores = {accession_core(acc) for acc in existing} - {""}
         added = 0
         for acc in accessions:
-            if acc in existing:
+            core = accession_core(acc)
+            if acc in existing or (core and core in existing_cores):
                 continue
             gd = GenomeData.from_acc(acc)
             gd.from_wanted_ref_tax = True
             gd.wanted_ref_tax_taxon = taxon
             self.ncbi_accs.append(gd)
             existing.add(acc)
+            if core:
+                existing_cores.add(core)
             added += 1
         if added:
             self.update_all_input_genomes()
@@ -770,22 +786,24 @@ class RunData:
 def populate_run_data(args):
     run_data = RunData()
 
+    from gtotree.utils.misc.genome_inputs import input_entries
+
     if args.ncbi_accessions:
-        entries_list = read_single_column_file(args.ncbi_accessions)
+        entries_list = input_entries(args.ncbi_accessions)
         run_data.ncbi_accs = [GenomeData.from_acc(entry) for entry in entries_list]
 
     if args.genbank_files:
-        entries_list = read_single_column_file(args.genbank_files)
+        entries_list = input_entries(args.genbank_files)
         run_data.genbank_files = [GenomeData.from_path(entry, SOURCE_GENBANK) for entry in entries_list]
 
     if args.fasta_files:
-        entries_list = read_single_column_file(args.fasta_files)
+        entries_list = input_entries(args.fasta_files)
         run_data.fasta_files = [GenomeData.from_path(entry, SOURCE_FASTA) for entry in entries_list]
         for gd in run_data.fasta_files:
             gd.prodigal_used = True
 
     if args.amino_acid_files:
-        entries_list = read_single_column_file(args.amino_acid_files)
+        entries_list = input_entries(args.amino_acid_files)
         run_data.amino_acid_files = [GenomeData.from_path(entry, SOURCE_AMINO_ACID) for entry in entries_list]
 
     run_data.update_all_input_genomes()
@@ -935,6 +953,27 @@ def resolve_input_genomes(args, run_data, error_cls):
 
     if not run_data.all_input_genomes:
         raise error_cls("No input genomes were resolved to work with.")
+
+    # the main gtotree preflight runs this same check; without it here, two inputs
+    # resolving to one ID (`s1/contigs.faa` + `s2/contigs.faa`, or `-A GCF_x.faa`
+    # alongside `-a GCF_x`) shared per-genome files and header prefixes
+    from gtotree.utils.misc.preflight_checks import (collect_genome_id_collisions,
+                                                     collect_duplicate_assemblies,
+                                                     duplicate_assemblies_message)
+    duplicates = collect_duplicate_assemblies(run_data)
+    if duplicates:
+        raise error_cls(duplicate_assemblies_message(duplicates))
+    collisions = collect_genome_id_collisions(run_data)
+    if collisions:
+        shown = sorted(collisions)[:10]
+        more = len(collisions) - len(shown)
+        raise error_cls(
+            f"{len(collisions)} genome ID(s) would be claimed by more than one input "
+            "genome, and each input genome needs to resolve to a unique ID (it's used "
+            "as both a filename and a sequence-header prefix): "
+            + ", ".join(shown) + (f", and {more} more" if more else "")
+            + ". Renaming the input files so their names differ (ignoring any `.gz` "
+            "and the sequence extension) will sort this out.")
 
     for line in input_genome_source_lines(args, run_data):
         print(line)
@@ -1141,9 +1180,14 @@ def search_threads_per_genome(args):
     return 2
 
 
+#: how often (seconds) a checkpointed pooled stage saves its progress
+CHECKPOINT_SECONDS = 60
+
+
 def run_pooled_stage(items, worker, apply_result, args, run_data,
                      max_workers_cap=None, bar_format=None, lead_newline=True,
-                     smoothing=GTT_PROGRESS_SMOOTHING):
+                     smoothing=GTT_PROGRESS_SMOOTHING, checkpoint=None,
+                     checkpoint_seconds=None):
     """
     Dispatches `worker(item, run_data)` across a ThreadPoolExecutor and, as each
     future completes, calls `apply_result(item, result, run_data)` on the MAIN
@@ -1177,6 +1221,11 @@ def run_pooled_stage(items, worker, apply_result, args, run_data,
     On KeyboardInterrupt, queued-but-not-yet-started work is cancelled rather than
     drained, so a ctrl-c during a big stage exits once the in-flight workers finish
     instead of waiting for every remaining item.
+
+    `checkpoint(run_data)`, when given, is called on the main thread at most every
+    `checkpoint_seconds` (default CHECKPOINT_SECONDS) as results are applied, and on
+    a ctrl-c (callers still save once the stage ends), so a long stage interrupted partway resumes
+    from what it had finished rather than from the stage's start.
     """
     from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
     from contextvars import copy_context
@@ -1213,6 +1262,8 @@ def run_pooled_stage(items, worker, apply_result, args, run_data,
 
     remaining = iter(items)
     in_flight = {}
+    every = CHECKPOINT_SECONDS if checkpoint_seconds is None else checkpoint_seconds
+    last_checkpoint = time.monotonic()
     try:
         with tqdm(total=len(items),
                   bar_format=bar_format or GTT_PROGRESS_BAR_FORMAT, ncols=76,
@@ -1232,12 +1283,22 @@ def run_pooled_stage(items, worker, apply_result, args, run_data,
                     apply_result(item, result, run_data)
                     pbar.update(1)
 
+                if checkpoint is not None and time.monotonic() - last_checkpoint >= every:
+                    checkpoint(run_data)
+                    last_checkpoint = time.monotonic()
+
                 # top up by however many just completed, so the window stays full
                 for item in islice(remaining, len(done)):
                     in_flight[submit(item)] = item
 
     except KeyboardInterrupt:
         pool.shutdown(wait=False, cancel_futures=True)
+        if checkpoint is not None:
+            # keep what was applied before the interrupt; never mask the ctrl-c
+            try:
+                checkpoint(run_data)
+            except Exception:
+                pass
         raise
     finally:
         pool.shutdown(wait=True)
@@ -1245,19 +1306,29 @@ def run_pooled_stage(items, worker, apply_result, args, run_data,
     return run_data
 
 
-def gunzip_if_needed(path, out_dir=None):
+GZIP_READ_BUFFER = 1 << 20
+
+
+def is_gzipped(path):
+    """True if the file starts with the gzip magic bytes, whatever it's named"""
+    with open(path, "rb") as fh:
+        return fh.read(2) == b"\x1f\x8b"
+
+
+def open_maybe_gzipped(path, mode="r"):
     """
-    Decompress `path` if it's gzipped, returning (usable_path, was_gzipped)
+    open() that reads through gzip when the file is gzipped, so a `.gz` genome can be
+    parsed where it sits instead of first being decompressed to a scratch copy.
+    Read modes only ("r" or "rb")
     """
-    if path.endswith(".gz"):
-        if out_dir is not None:
-            gunzipped_path = os.path.join(out_dir, os.path.basename(path)[:-3])
-        else:
-            gunzipped_path = path[:-3]
-        with gzip.open(path, 'rb') as f_in, open(gunzipped_path, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
-        return gunzipped_path, True
-    return path, False
+    if mode not in ("r", "rb"):
+        raise ValueError(f"open_maybe_gzipped reads only, not mode {mode!r}")
+    if is_gzipped(path):
+        # a big read buffer: GzipFile's own line reads are slow enough that reading
+        # through it unbuffered lost to decompressing to disk and reading that back
+        raw = io.BufferedReader(gzip.GzipFile(path, "rb"), buffer_size=GZIP_READ_BUFFER)
+        return io.TextIOWrapper(raw) if mode == "r" else raw
+    return open(path, mode)
 
 
 def remove_file_if_exists(path):
@@ -1373,6 +1444,25 @@ def write_accessions(out_path, accessions):
             f.write(str(acc) + "\n")
 
     atomic_write_text(out_path, _write)
+
+_NEWICK_UNSAFE = re.compile(r"[\s()\[\]:;,'\"]+")
+
+
+def newick_safe_label_part(value):
+    """
+    One taxonomy value made safe to drop into a tree/alignment label
+
+    Mapping-file labels are refused if they hold these characters, but the ones built
+    from NCBI/GTDB taxonomy weren't checked, and real names carry them:
+    `[Clostridium] scindens` (dendropy reads `[...]` as a comment), `O157:H7` and
+    `(sp.)` (FastTree truncates at ':' and drops parentheses), so tree labels stopped
+    matching the alignment. Runs of them inside the value become one '_', and any at
+    the ends are dropped (whitespace-only changes are exactly what the old
+    `.replace(" ", "_")` did).
+    """
+    value = re.sub(rf"^{_NEWICK_UNSAFE.pattern}|{_NEWICK_UNSAFE.pattern}$", "", str(value))
+    return _NEWICK_UNSAFE.sub("_", value)
+
 
 def apply_suffixes_to_mapping_dict(run_data):
     if not run_data.suffix_dict:

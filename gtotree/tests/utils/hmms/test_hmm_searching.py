@@ -43,6 +43,30 @@ def test_single_hit_per_target(tmp_path):
     assert (n_hits, n_unique) == (2, 2)
 
 
+def test_a_hash_inside_a_gene_id_is_not_a_comment(tmp_path):
+    # genome ids become header prefixes, and pandas' comment="#" cut each row at the
+    # '#', failing every search for a genome like `sample#3`
+    rd = _run_data(["A", "B"])
+    path = _tblout(tmp_path, [("sample#3_1", "A"), ("sample#3_2", "B")])
+
+    counts, gene_ids, n_hits, n_unique = parse_hmmer_results(path, rd)
+
+    assert gene_ids == {"A": "sample#3_1", "B": "sample#3_2"}
+    assert (n_hits, n_unique) == (2, 2)
+
+
+def test_all_numeric_profile_names_still_match(tmp_path):
+    # type inference read the target column as ints, which never matched the string
+    # SCG ids, so every count came out 0
+    rd = _run_data(["456", "0789"])
+    path = _tblout(tmp_path, [("g1", "456"), ("g2", "0789")])
+
+    counts, gene_ids, _n_hits, _n_unique = parse_hmmer_results(path, rd)
+
+    assert counts == {"456": 1, "0789": 1}
+    assert gene_ids == {"456": "g1", "0789": "g2"}
+
+
 def test_target_with_no_hits_counts_zero_and_has_no_gene(tmp_path):
     rd = _run_data(["A", "B", "C"])
     path = _tblout(tmp_path, [("g1", "A")])

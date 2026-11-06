@@ -24,6 +24,7 @@ import socket
 import sys
 import urllib
 import urllib.error
+import http.client
 
 from gtotree.utils.misc.messaging import (wprint, color_text, report_message,
                                           report_early_exit)
@@ -152,18 +153,26 @@ class HostedParquetAsset:
 
         default_timeout = socket.getdefaulttimeout()
         socket.setdefaulttimeout(DOWNLOAD_TIMEOUT)
+        # staged beside the live pair and only swapped in once BOTH new files check
+        # out, so a failed `-f` refresh leaves the existing (good) tables in place
+        # rather than deleting them
+        staged_table = table_path + ".new"
+        staged_sidecar = sidecar_path + ".new"
         try:
             download_with_tqdm(self.data_url, f"        {self.download_label}",
-                               table_path, speed_gate=True)
+                               staged_table, speed_gate=True)
 
             # catches a truncated/corrupt download without reading the whole table
-            self.verify_parquet(table_path)
+            self.verify_parquet(staged_table)
 
-            self.download_sidecar(sidecar_path)
+            self.download_sidecar(staged_sidecar)
+
+            os.replace(staged_table, table_path)
+            os.replace(staged_sidecar, sidecar_path)
 
         except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError,
-                OSError) as err:
-            for p in (table_path, sidecar_path):
+                OSError, http.client.HTTPException) as err:
+            for p in (staged_table, staged_sidecar):
                 if os.path.exists(p):
                     try:
                         os.remove(p)

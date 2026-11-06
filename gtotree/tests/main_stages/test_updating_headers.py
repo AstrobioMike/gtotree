@@ -176,3 +176,21 @@ def test_a_missing_alignment_still_exits(tmp_path):
 
     with pytest.raises(SystemExit):
         update_headers(make_args(), rd)
+
+
+def test_a_retried_swap_does_not_apply_suffixes_twice(tmp_path, monkeypatch):
+    # suffixes were written into mapping_dict in place and the fallback persisted
+    # that, so the `-R` retry (the stage is left incomplete on purpose) produced
+    # labels like `G0_sfx_sfx`
+    rd = make_run_data(tmp_path)
+    rd.mapping_dict = {}
+    rd.suffix_dict = {"G0": "sfx"}
+
+    monkeypatch.setattr(U, "swap_labels_in_alignment", explode("disk full"))
+    rd = update_headers(make_args(), rd)
+    assert not rd.stage_is_complete(PipelineStage.UPDATE_HEADERS)
+
+    monkeypatch.setattr(U, "swap_labels_in_alignment", real_swap)
+    rd = update_headers(make_args(), rd)
+
+    assert rd.mapping_dict["G0"] == "G0_sfx"

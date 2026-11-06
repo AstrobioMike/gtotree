@@ -45,20 +45,34 @@ gtotree -w Nitrospirota -o nitrospirota-tree
 
 This can be combined freely with the other input types, so you can add your own new genomes as fasta files alongside references pulled by taxonomy.
 
+### How the genome inputs can be given
+Each of **`-a`**, **`-g`**, **`-f`**, and **`-A`** takes one or more values, and they can be mixed freely:
+
+* **The genome files themselves**, e.g. `-f my-genome.fasta other-genome.fasta`, or with a shell wildcard, `-f fastas/*.fasta`
+* **A quoted pattern**, e.g. `-f "fastas/*.fasta"`, which GToTree expands itself (see the note below on why that matters for big sets)
+* **A single-column file listing them**, one path per line (blank lines and lines starting with `#` are skipped)
+* For **`-a`**, the accessions themselves (e.g. `-a GCF_000005845.2 GCF_000009065.1`) and/or a single-column file listing them
+
+GToTree tells genome files from list files by their extension (`.fa`, `.fasta`, `.fna`, `.faa`, `.gb`, `.gbk`, `.gbff`, each optionally `.gz`), and for anything else by whether the file starts like a fasta or GenBank file. So, e.g., `-f my-list.txt extra-genome.fasta` works as expected. Anything given more than once is only used once.
+
+> **Working with many thousands of files:** when a shell wildcard like `fastas/*.fasta` matches a very large number of files, the shell itself can refuse to start the program with an "Argument list too long" error. That happens before GToTree runs, so GToTree can't catch it. The limit is on the total length of the command line: roughly 2 MB on Linux and 1 MB on macOS, which with typical path lengths is somewhere around 20,000-40,000 files on Linux and 10,000-20,000 on a Mac (fewer with long paths). Two ways around it, both with no limit:
+> * put the pattern in quotes, e.g. `-f "fastas/*.fasta"`, so GToTree expands it rather than the shell
+> * or provide a single-column file listing the paths, e.g. made with `ls fastas/*.fasta > fasta-files.txt` (or `find fastas -name "*.fasta" > fasta-files.txt`, which also avoids the limit)
+
 ### NCBI Accessions
-You can specify which NCBI-archived genomes you'd like to incorporate by providing a single-column file holding NCBI assembly accessions to the **`-a`** argument. This file can be created "manually" by searching NCBI's website and downloading a results table, or generated at the command line with `gtt get-accs-from-ncbi` or `gtt get-accs-from-gtdb` – examples are on the [examples page here](https://github.com/AstrobioMike/GToTree/wiki/example-usage#accessions).
+You can specify which NCBI-archived genomes you'd like to incorporate by providing NCBI assembly accessions to the **`-a`** argument, directly and/or as a single-column file holding them. Such a file can be created "manually" by searching NCBI's website and downloading a results table, or generated at the command line with `gtt get-accs-from-ncbi` or `gtt get-accs-from-gtdb` – examples are on the [examples page here](https://github.com/AstrobioMike/GToTree/wiki/example-usage#accessions).
 
 * Those provided can have version numbers (what comes after the "." in the accession, e.g. GCF_000153765.1), or they can be version-less (e.g. GCF_000153765). In the case where no version is provided, GToTree will automatically take the newest released version of that accession.
 * If any of the provided accessions cannot be found at NCBI, they will be reported in `run-files/removed-genomes.tsv`.
 
 ### GenBank files
-To specify which GenBank files to include, you need to provide a single-column file that holds the file names (or [paths](https://astrobiomike.github.io/unix/basics#absolute-vs-relative-path)) to each of the GenBank files you'd like incorporated. This is passed to the **`-g`** argument.
+GenBank files are passed to the **`-g`** argument: the files themselves, a pattern, and/or a single-column file holding the file names (or [paths](https://astrobiomike.github.io/unix/basics#absolute-vs-relative-path)) of each GenBank file you'd like incorporated.
 
 ### Fasta files
-Nucleotide fasta files are provided similarly to the GenBank files, but passed to the **`-f`** argument. Genes will be called with [Prodigal](https://github.com/hyattpd/Prodigal).
+Nucleotide fasta files are provided the same ways as the GenBank files, but passed to the **`-f`** argument. Genes will be called with [Prodigal](https://github.com/hyattpd/Prodigal) (via [pyrodigal](https://github.com/althonos/pyrodigal)).
 
 ### Amino-acid files
-Amino-acid files can be provided similarly, but passed to the **`-A`** argument. Each file should hold the proteins for one genome.
+Amino-acid files are provided the same ways, but passed to the **`-A`** argument. Each file should hold the proteins for one genome.
 
 ## Specifying which single-copy gene-set to use
 GToTree needs to know which SCG-set to use – passed with the **`-H`** flag. There are 46 packaged with the program (discussed in more detail [here](https://github.com/AstrobioMike/GToTree/wiki/scg-sets)). You can view which are available by running **`gtt hmms`**, and you don't need to specify a full path, just the name as printed there (e.g. `-H Bacteria`). You can also pass a path to your own HMM file.
@@ -249,14 +263,14 @@ How many threads each individual muscle alignment job is given.
 ### Overriding the super5 alignment algorithm
 * **[-X ] default: false**
 
-With more than 500 input genomes, GToTree uses muscle's [super5](https://drive5.com/muscle5/manual/super5_algo.html) algorithm to keep alignment times reasonable. Provide **`-X`** to use the regular [PPP](https://drive5.com/muscle5/manual/ppp_algo.html) algorithm anyway – see [here](https://github.com/AstrobioMike/GToTree/wiki/things-to-consider#working-with-many-genomes) for more.
+GToTree uses muscle's [super5](https://drive5.com/muscle5/manual/super5_algo.html) algorithm by default to keep alignment times reasonable. Provide **`-X`** to use the regular [PPP](https://drive5.com/muscle5/manual/ppp_algo.html) algorithm instead – see [here](https://github.com/AstrobioMike/GToTree/wiki/things-to-consider#working-with-many-genomes) for more.
 
 ---
 
 ### Choosing the treeing program
-* **[-T \<str\>] default: FastTreeMP**
+* **[-T \<str\>] default: VeryFastTree**
 
-Which program builds the tree. Options are `FastTree`, `FastTreeMP`, `VeryFastTree`, and `IQTREE`.
+Which program builds the tree. Options are `FastTree`, `FastTreeMP`, `VeryFastTree`, and `IQTREE`. [VeryFastTree](https://github.com/citiususc/veryfasttree) is a faster, parallelized reimplementation of FastTree's algorithm; in testing it gave the same trees as FastTreeMP in about a third of the time.
 
 ---
 
@@ -320,7 +334,7 @@ GToTree fingerprints the inputs and settings of each run. On a resume, if anythi
 HMM searches are performed in-process with [pyhmmer](https://pyhmmer.readthedocs.io/), rather than by shelling out to `hmmsearch`. The searches use the gathering thresholds (`--cut_ga`-equivalent) stored in the HMM profiles being used for cutoff values, as before. GToTree will exit up front if a provided HMM file has profiles lacking gathering thresholds.
 
 ## muscle
-[Muscle](https://www.drive5.com/muscle/downloads.htm) is run with default settings using the [`-align` PPP algorithm](https://drive5.com/muscle5/manual/ppp_algo.html) when working with fewer than 1,000 target genomes. When run with greater than 500 input genomes, the [`-super5` algorithm](https://drive5.com/muscle5/manual/super5_algo.html) is used. This can be overridden by adding `-X` to the GToTree call – see [here](https://github.com/AstrobioMike/GToTree/wiki/things-to-consider#working-with-many-genomes) for more on this. The number of threads given to each alignment job is set with `-M` (default 5).
+[Muscle](https://www.drive5.com/muscle/downloads.htm) is run with default settings using the [`-super5` algorithm](https://drive5.com/muscle5/manual/super5_algo.html). The [`-align` PPP algorithm](https://drive5.com/muscle5/manual/ppp_algo.html) can be used instead by adding `-X` to the GToTree call – see [here](https://github.com/AstrobioMike/GToTree/wiki/things-to-consider#working-with-many-genomes) for more on this. The number of threads given to each alignment job is set with `-M` (default 5).
 
 ## trimal
 [Trimal](http://trimal.cgenomics.org/downloads) is run with default settings other than setting the `-automated1` flag, which performs "a heuristic selection of the automatic method based on similarity statistics. (Optimized for Maximum Likelihood phylogenetic tree reconstruction)."

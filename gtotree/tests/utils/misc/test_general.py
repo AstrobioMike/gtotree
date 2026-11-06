@@ -1,4 +1,5 @@
 import dataclasses
+import os
 import json
 import socket
 import urllib.error
@@ -302,6 +303,29 @@ def test_stream_once_writes_full_payload_known_length(tmp_path, monkeypatch):
     assert not (tmp_path / "out.bin.part").exists()
 
 
+def test_stream_once_refuses_a_body_shorter_than_its_content_length(tmp_path,
+                                                                    monkeypatch):
+    """A connection that closes early used to be padded out on the bar and renamed
+    into place as if complete"""
+    import pytest # type: ignore
+    payload = b"z" * 300_000
+    dest = str(tmp_path / "out.bin")
+
+    def fake_urlopen(target, *a, **k):
+        return _FakeResp(headers={"Content-Length": str(len(payload))},
+                         chunks=[payload[:1000]])
+
+    monkeypatch.setattr(general.urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(ConnectionError, match="truncated"):
+        general._stream_once("http://x/y", dest, "label", leave=False,
+                             floor_bytes_per_s=0.0, probe_seconds=5.0)
+
+    from pathlib import Path
+    assert not Path(dest).exists()
+    assert not (tmp_path / "out.bin.part").exists()
+
+
 def test_stream_once_writes_full_payload_unknown_length(tmp_path, monkeypatch):
     """No Content-Length (total stays None): the whole payload is still written
     via the len(buf) bar-update branch, and the bar stays indeterminate."""
@@ -525,3 +549,41 @@ def test_get_path_rel_to_outdir_keeps_outdir_when_basename_repeats_it(tmp_path, 
     # a path with no repeated component behaves the same way
     aln = str(outdir / "aligned-SCGs.faa")
     assert get_path_rel_to_outdir(aln, args) == "GToTree-output/aligned-SCGs.faa"
+
+
+def test_gzipped_input_is_read_in_place_whatever_its_suffix(tmp_path):
+    # judged by its bytes: `x.faa.GZ` (from_path strips `.gz` case-insensitively) and
+    # a gzip with no suffix at all both read through, and plain text reads as-is
+    import gzip
+    for name in ("up.faa.GZ", "nosuffix.faa"):
+        src = tmp_path / name
+        with gzip.open(src, "wt") as fh:
+            fh.write(">p\nMKV\n")
+        assert general.is_gzipped(str(src))
+        with general.open_maybe_gzipped(str(src)) as fh:
+            assert fh.read() == ">p\nMKV\n"
+    plain = tmp_path / "plain.faa"
+    plain.write_text(">p\nMKV\n")
+    assert not general.is_gzipped(str(plain))
+    with general.open_maybe_gzipped(str(plain), "rb") as fh:
+        assert fh.read() == b">p\nMKV\n"
+    assert sorted(os.listdir(tmp_path)) == ["nosuffix.faa", "plain.faa", "up.faa.GZ"]
+
+
+def test_taxonomy_labels_are_made_newick_safe(monkeypatch):
+    # labels built from taxonomy only had spaces replaced, so names like
+    # `[Clostridium] scindens` and `O157:H7` broke the tree labels
+    import types
+    from gtotree.utils.ncbi import handle_ncbi_tax_info as mod
+    rd = general.RunData()
+    monkeypatch.setattr(mod, "subset_ncbi_info", lambda run_data: {
+        "GCF_000000001.1": {"phylum": "Bacillota", "species": "[Clostridium] scindens"},
+        "GCF_000000002.1": {"phylum": "Pseudomonadota",
+                            "species": "Escherichia coli O157:H7"},
+    })
+    args = types.SimpleNamespace(lineage="phylum,species")
+    rd = mod.update_mapping_dict_with_ncbi_tax_info(args, rd)
+    assert rd.mapping_dict == {
+        "GCF_000000001.1": "GCF_000000001.1_Bacillota_Clostridium_scindens",
+        "GCF_000000002.1": "GCF_000000002.1_Pseudomonadota_Escherichia_coli_O157_H7",
+    }

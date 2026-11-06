@@ -234,28 +234,24 @@ def test_pooled_fetch_accepts_num_jobs_without_args(tmp_path, monkeypatch):
 # prodigal
 ################################################################################
 
-def test_run_prodigal_missing_binary(tmp_path, monkeypatch):
+def test_run_prodigal_missing_pyrodigal(tmp_path, monkeypatch):
     def boom(*args, **kwargs):
-        raise FileNotFoundError()
+        raise ImportError("No module named 'pyrodigal'")
 
-    monkeypatch.setattr(mod.subprocess, "run", boom)
+    monkeypatch.setattr(mod, "call_genes", boom)
 
-    with pytest.raises(TargetGenomeError, match="prodigal doesn't seem to be available"):
+    with pytest.raises(TargetGenomeError, match="pyrodigal doesn't seem to be available"):
         mod.run_prodigal(str(tmp_path / "in.fna"), str(tmp_path / "out.faa"))
 
 
-def test_run_prodigal_cleans_up_on_failure(tmp_path, monkeypatch):
+def test_run_prodigal_cleans_up_on_failure(tmp_path):
     """A failed call must not leave a `.part` behind."""
+    src = tmp_path / "in.fna"
+    src.write_text(">c\n" + "ACGT" * 100 + "\n")     # too short to train on
     out = tmp_path / "out.faa"
 
-    class Result:
-        returncode = 1
-        stderr = b"boom"
-
-    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Result())
-
     with pytest.raises(TargetGenomeError):
-        mod.run_prodigal(str(tmp_path / "in.fna"), str(out))
+        mod.run_prodigal(str(src), str(out))
 
     assert not out.exists()
     assert not (tmp_path / "out.faa.part").exists()

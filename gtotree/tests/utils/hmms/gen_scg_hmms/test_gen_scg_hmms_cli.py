@@ -40,11 +40,12 @@ def test_input_sources_can_be_combined():
     args = _parse("-a", "accs.txt", "-w", "Nitrospirota",
                   "-g", "gb.txt", "-f", "fa.txt", "-A", "aa.txt")
     check_args(args)
-    assert args.ncbi_accessions == "accs.txt"
+    # each genome-input flag takes one or more values
+    assert args.ncbi_accessions == ["accs.txt"]
     assert args.wanted_ref_tax == ["Nitrospirota"]
-    assert args.genbank_files == "gb.txt"
-    assert args.fasta_files == "fa.txt"
-    assert args.amino_acid_files == "aa.txt"
+    assert args.genbank_files == ["gb.txt"]
+    assert args.fasta_files == ["fa.txt"]
+    assert args.amino_acid_files == ["aa.txt"]
 
 
 ################################################################################

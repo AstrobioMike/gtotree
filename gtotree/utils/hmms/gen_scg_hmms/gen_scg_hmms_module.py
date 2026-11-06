@@ -204,17 +204,30 @@ def count_single_copy_hits(hits_by_genome, genome_ids, filtered_accs,
         raise GenSCGHMMsError("no genomes were available to determine single-copy genes from.")
 
     total = len(genome_ids)
-    threshold = percent_single_copy / 100.0 * total
 
     single_copy_counts = count_single_copy_genomes(hits_by_genome, genome_ids)
 
-    wanted = [acc for acc in filtered_accs if single_copy_counts.get(acc, 0) >= threshold]
+    wanted = [acc for acc in filtered_accs
+              if meets_percent(single_copy_counts.get(acc, 0), total,
+                               percent_single_copy)]
 
     per_genome_counts = {
         genome_id: dict(hits_by_genome.get(genome_id, {})) for genome_id in genome_ids
     }
 
     return wanted, per_genome_counts
+
+
+def meets_percent(count, total, percent):
+    """
+    True when `count` of `total` is at least `percent`%
+
+    Compared as count*100 vs percent*total rather than against percent/100*total,
+    which rounds up past exact boundaries (55/100.0*100 is 55.00000000000001, so a
+    Pfam single-copy in exactly 55 of 100 genomes failed `-p 55`). The tiny epsilon
+    only matters for a non-integer percent.
+    """
+    return count * 100 >= percent * total - 1e-9
 
 
 SHARED_PAIR_SEP = "|"
@@ -308,10 +321,11 @@ def resolve_shared_protein_conflicts(wanted_accs, genomes_sharing, genome_ids,
     built by `count_genomes_sharing` over `genome_ids`.
 
     A pair conflicts when both Pfams are in `wanted_accs` and at least one protein is
-    hit by both in >= `max_shared_percent`% of `genome_ids`. Conflicts are settled
-    most-shared first; each time, the Pfam that is single-copy in more genomes is kept
-    (ties go to the lower accession, just so it's deterministic). A Pfam already dropped
-    doesn't knock anything else out, so three domains on one protein leave one behind.
+    hit by both in >= `max_shared_percent`% of `genome_ids`. Conflicts are settled by
+    priority: Pfams are taken from most widely single-copy down (ties go to the lower
+    accession, just so it's deterministic), and each is kept unless it conflicts with
+    one already kept. A dropped Pfam never knocks anything else out, so three domains
+    on one protein leave one behind.
 
     Returns (kept_accs in their original order, [SharedProteinExclusion, ...]).
     """
@@ -320,11 +334,10 @@ def resolve_shared_protein_conflicts(wanted_accs, genomes_sharing, genome_ids,
         return list(wanted_accs), []
 
     wanted_set = set(wanted_accs)
-    threshold = max_shared_percent / 100.0 * total
 
     conflicts = []
     for key, n in genomes_sharing.items():
-        if n <= 0 or n < threshold:
+        if n <= 0 or not meets_percent(n, total, max_shared_percent):
             continue
         a, b = split_shared_pair_key(key)
         if a in wanted_set and b in wanted_set:
@@ -335,19 +348,33 @@ def resolve_shared_protein_conflicts(wanted_accs, genomes_sharing, genome_ids,
 
     single_copy_counts = count_single_copy_genomes(hits_by_genome, genome_ids)
 
-    # most-shared first, then by key so the order is fully deterministic
-    conflicts.sort(key=lambda item: (-item[1], item[0]))
-
-    dropped = {}
-    exclusions = []
+    # {acc: {partner: n genomes sharing}} for every conflicting pair
+    partners = {}
     for key, n in conflicts:
         a, b = split_shared_pair_key(key)
-        if a in dropped or b in dropped:
+        partners.setdefault(a, {})[b] = n
+        partners.setdefault(b, {})[a] = n
+
+    # Settled by priority rather than pair by pair: walk the Pfams from most widely
+    # single-copy down (ties to the lower accession, so it's deterministic), keeping
+    # each one unless it conflicts with one already kept. Going pair by pair, a Pfam
+    # could knock another out and then lose a later pair itself, leaving the first one
+    # dropped in favour of something no longer in the set (A-B, A-C conflicting but not
+    # B-C could come out as just C, when B+C was valid)
+    order = sorted(partners, key=lambda acc: (-single_copy_counts.get(acc, 0), acc))
+    kept_set = set()
+    dropped = set()
+    exclusions = []
+    for acc in order:
+        blockers = [(n, other) for other, n in partners[acc].items() if other in kept_set]
+        if not blockers:
+            kept_set.add(acc)
             continue
-        keep, drop = sorted((a, b), key=lambda acc: (-single_copy_counts.get(acc, 0), acc))
-        dropped[drop] = keep
+        # credit the kept Pfam it shares the most with (then the lower accession)
+        n, keep = min(blockers, key=lambda item: (-item[0], item[1]))
+        dropped.add(acc)
         exclusions.append(SharedProteinExclusion(
-            dropped_acc=drop, kept_acc=keep, num_genomes_shared=n,
+            dropped_acc=acc, kept_acc=keep, num_genomes_shared=n,
             percent_genomes_shared=round(n / total * 100, 2)))
 
     kept = [acc for acc in wanted_accs if acc not in dropped]

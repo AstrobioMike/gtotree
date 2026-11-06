@@ -241,6 +241,24 @@ class TestDownload:
 
         assert not (tmp_path / asset.sidecar_filename).exists()
 
+    def test_a_failed_refresh_leaves_the_existing_pair_in_place(self, asset, tmp_path):
+        """A `-f` refresh that fails used to delete the good local tables it was
+        meant to replace (and a corrupt new table overwrote the old one before it
+        was even checked)"""
+        _valid_parquet(tmp_path / asset.parquet_filename)
+        (tmp_path / asset.sidecar_filename).write_text(_sidecar_body(asset))
+
+        with patch(f"{MODPATH}.download_with_tqdm",
+                   side_effect=_fake_downloader(asset, break_parquet=True)), \
+             patch(f"{MODPATH}.report_early_exit", side_effect=SystemExit(1)):
+            with pytest.raises(SystemExit):
+                asset.download(str(tmp_path))
+
+        table = tmp_path / asset.parquet_filename
+        assert pq.ParquetFile(str(table)).metadata.num_rows == 1
+        assert (tmp_path / asset.sidecar_filename).read_text() == _sidecar_body(asset)
+        assert list(tmp_path.glob("*.new")) == []
+
     def test_no_part_file_is_left_behind_on_failure(self, asset, tmp_path):
         bad = BAD_SIDECAR_BODIES[asset.env_var]
 

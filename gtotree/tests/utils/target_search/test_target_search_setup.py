@@ -153,9 +153,11 @@ def test_prodigal_required_when_gene_calling_is_possible(spec, monkeypatch, sour
     Nucleotide fastas always call genes; NCBI assemblies with no protein file and
     GenBank files with no usable CDS translations both fall back to prodigal.
     """
-    monkeypatch.setattr("shutil.which", lambda cmd: None)
+    from gtotree.utils.target_search import target_search_setup as setup_mod
+    monkeypatch.setattr("shutil.which", lambda cmd: "/bin/x")
+    monkeypatch.setattr(setup_mod, "_pyrodigal_available", lambda: False)
     args = make_args(**{source_flag: "x"})
-    with pytest.raises(TargetSearchError, match="prodigal"):
+    with pytest.raises(TargetSearchError, match="pyrodigal"):
         check_dependencies(args, spec)
 
 

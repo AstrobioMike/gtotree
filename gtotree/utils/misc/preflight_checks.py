@@ -20,7 +20,6 @@ from gtotree.utils.misc.messaging import (color_text,
                                      report_run_info_banner,
                                      RUN_INFO_BANNER,
                                      RUN_INFO_BANNER_TRAILING_BLANKS,
-                                     many_genomes_notice,
                                      few_genomes_notice,
                                      absurd_number_of_genomes_notice,
                                      gtotree_header,
@@ -46,7 +45,7 @@ from gtotree.utils.taxonomy.wanted_ref_tax import (resolve_wanted_ref_tax_access
                                                    expand_wanted_ref_tax,
                                                    describe_all_expansion,
                                                    WantedRefTaxError)
-from gtotree.utils.misc.general import (ToolsUsed,
+from gtotree.utils.misc.general import (ToolsUsed, GenomeData,
                                    read_single_column_file,
                                    duplicate_entries,
                                    CorruptRunData,
@@ -59,8 +58,11 @@ from gtotree.utils.misc.target_id_checks import (check_target_id_file,
                                                  TargetIDFormatError)
 from gtotree.utils.misc.stages import PipelineStage
 from gtotree.utils.misc.resume_state import (ResumeProfile, hash_file_contents,
-                                        STATE_VERSION)
+                                        hash_local_genomes, STATE_VERSION)
 from gtotree.utils.misc.context import log_file_var
+from gtotree.utils.misc.genome_inputs import (GENOME_INPUT_FLAGS, GenomeInputError,
+                                              hash_input_entries, input_entries,
+                                              resolve_genome_input_args)
 
 
 def preflight_checks(args):
@@ -78,6 +80,7 @@ def preflight_checks(args):
     run_data = merge_wanted_ref_tax(run_data, selections,
                                     exclusion_list=getattr(args, "exclusion_list", None))
     check_for_genome_id_collisions(run_data)
+    check_for_duplicate_assemblies(run_data)
     check_for_min_input_genomes(run_data)
     run_data = track_tools_used(args, run_data)
     args, run_data = final_setups(args, run_data)
@@ -89,15 +92,17 @@ RESUME = ResumeProfile(
     name="GToTree",
     field_labels={
         "state_version": "the run-state format",
-        "ncbi_accessions_sha256": "the NCBI accessions file (-a)",
-        "genbank_files_sha256": "the GenBank files list (-g)",
-        "fasta_files_sha256": "the fasta files list (-f)",
-        "amino_acid_files_sha256": "the amino-acid files list (-A)",
+        "ncbi_accessions_sha256": "the NCBI accessions (-a)",
+        "genbank_files_sha256": "the GenBank files (-g)",
+        "fasta_files_sha256": "the fasta files (-f)",
+        "amino_acid_files_sha256": "the amino-acid files (-A)",
         "mapping_file_sha256": "the mapping file (-m)",
         "target_pfams_sha256": "the target Pfams file (-p)",
         "target_kos_sha256": "the target KOs file (-K)",
         "exclusion_list_sha256": "the exclusion list (--exclusion-list)",
+        "local_genomes_sha256": "the genome files listed with -g/-f/-A (contents, paths, or set)",
         "hmm": "-H/--hmm",
+        "hmm_file_sha256": "the -H HMM file (contents)",
         "wanted_ref_tax": "-w/--wanted-ref-tax",
         "target_rank": "--target-rank",
         "target_domain": "--target-domain",
@@ -120,12 +125,18 @@ RESUME = ResumeProfile(
     },
 )
 
-# input files are fingerprinted by contents
-_INPUT_FILE_FIELDS = (
+# the genome inputs are fingerprinted by their resolved entries, whatever form they
+# were given in (list files, files directly, patterns); the per-file contents and
+# timestamps are covered by local_genomes_sha256
+_GENOME_INPUT_FIELDS = (
     ("ncbi_accessions_sha256", "ncbi_accessions"),
     ("genbank_files_sha256", "genbank_files"),
     ("fasta_files_sha256", "fasta_files"),
     ("amino_acid_files_sha256", "amino_acid_files"),
+)
+
+# other input files are fingerprinted by contents
+_INPUT_FILE_FIELDS = (
     ("mapping_file_sha256", "mapping_file"),
     ("target_pfams_sha256", "target_pfams_file"),
     ("target_kos_sha256", "target_kos_file"),
@@ -140,11 +151,27 @@ _EXECUTION_ONLY_ARGS = ("num_jobs", "num_muscle_threads", "keep_working_dir",
                         "output_already_existed")
 
 
+def _listed_local_genomes(args):
+    """
+    GenomeData for every genome file given with -g/-f/-A, built the same way populate_run_data
+    builds them
+    """
+    genomes = []
+    for dest, source in (("genbank_files", SOURCE_GENBANK), ("fasta_files", SOURCE_FASTA),
+                         ("amino_acid_files", SOURCE_AMINO_ACID)):
+        genomes.extend(GenomeData.from_path(entry, source)
+                       for entry in input_entries(getattr(args, dest, None)))
+    return genomes
+
+
 def build_fingerprint(args):
     """
     Everything about this run that affects what it produces
     """
     fingerprint = {"state_version": STATE_VERSION}
+
+    for field, dest in _GENOME_INPUT_FIELDS:
+        fingerprint[field] = hash_input_entries(getattr(args, dest, None))
 
     for field, dest in _INPUT_FILE_FIELDS:
         fingerprint[field] = hash_file_contents(getattr(args, dest, None))
@@ -153,6 +180,15 @@ def build_fingerprint(args):
         if field in fingerprint:
             continue
         fingerprint[field] = getattr(args, field, None)
+
+    # the listing files alone said nothing about the genome files they point to, so
+    # an edited or replaced fasta resumed against the old results (the subcommands
+    # already fingerprint these the same way)
+    fingerprint["local_genomes_sha256"] = hash_local_genomes(_listed_local_genomes(args))
+    # likewise a local -H file edited in place (a packaged set is pinned by its name)
+    hmm = getattr(args, "hmm", None)
+    fingerprint["hmm_file_sha256"] = (hash_file_contents(hmm)
+                                      if hmm and os.path.isfile(hmm) else None)
 
     fingerprint["wanted_ref_tax"] = sorted(wanted_ref_tax_list(args)) or None
     fingerprint["gtdb_section"] = resolved_gtdb_section(
@@ -241,7 +277,7 @@ def check_set_values(args):
         report_very_early_exit()
 
     if args.gene_representation_cutoff <0 or args.gene_representation_cutoff > 1:
-        report_message("The gene-representation-cutoff value (passed to `-g`) must be between 0 and 1 (inclusive).")
+        report_message("The gene-representation-cutoff value (passed to `-r`) must be between 0 and 1 (inclusive).")
         report_very_early_exit()
 
     if args.genome_hits_cutoff < 0 or args.genome_hits_cutoff > 1:
@@ -526,17 +562,11 @@ def resolve_hmm(args, selections=None, previous_run_data=None):
 
 def check_input_genome_files(args):
     """
-    Validate the single-column input-genome lists, up front so a malformed one fails
-    before any asset is downloaded or any taxon resolved.
+    Resolve and validate the genome inputs up front, so a bad one fails before any
+    asset is downloaded or any taxon resolved. Each of -a/-g/-f/-A can be genome files
+    (or accessions), patterns, and/or list files (see genome_inputs.py)
     """
-    if args.ncbi_accessions:
-        args.ncbi_accessions = check_expected_single_column_input(args.ncbi_accessions, "-a")
-    if args.genbank_files:
-        args.genbank_files = check_expected_single_column_input(args.genbank_files, "-g")
-    if args.fasta_files:
-        args.fasta_files = check_expected_single_column_input(args.fasta_files, "-f")
-    if args.amino_acid_files:
-        args.amino_acid_files = check_expected_single_column_input(args.amino_acid_files, "-A")
+    args = resolve_and_check_genome_inputs(args)
 
     if getattr(args, "exclusion_list", None):
         if not args.wanted_ref_tax:
@@ -682,6 +712,48 @@ def check_for_genome_id_collisions(run_data):
     report_very_early_exit()
 
 
+def collect_duplicate_assemblies(run_data):
+    """
+    {accession core -> the NCBI-accession inputs that share it}, for any assembly given
+    more than once under different accessions (its GCA_ and GCF_, or two versions)
+
+    Their genome ids differ, so the id-collision check can't see them, but they're the
+    same genome and would sit in the tree as a zero-length pair
+    """
+    from gtotree.utils.taxonomy.tax_ranks import accession_core
+    by_core = {}
+    for gd in run_data.ncbi_accs:
+        core = accession_core(gd.id)
+        if core:
+            by_core.setdefault(core, []).append(gd)
+    return {core: gds for core, gds in by_core.items() if len(gds) > 1}
+
+
+def duplicate_assemblies_message(duplicates, limit=MAX_REPORTED_ID_COLLISIONS):
+    """
+    The explanation of `collect_duplicate_assemblies` output, shared by every program
+    """
+    plural = "y was" if len(duplicates) == 1 else "ies were"
+    lines = [f"{len(duplicates)} assembl{plural} given more than once under different "
+             "accessions (e.g., as both its GCA_ and GCF_, or as two versions), which "
+             "would put the same genome in the tree twice. Please keep just one "
+             "accession for each:"]
+    shown = list(duplicates.values())[:limit]
+    for gds in shown:
+        lines.append("    " + "  /  ".join(gd.id for gd in gds))
+    if len(duplicates) > len(shown):
+        lines.append(f"    ...and {len(duplicates) - len(shown)} more.")
+    return "\n".join(lines)
+
+
+def check_for_duplicate_assemblies(run_data):
+    duplicates = collect_duplicate_assemblies(run_data)
+    if not duplicates:
+        return
+    report_message(duplicate_assemblies_message(duplicates))
+    report_very_early_exit()
+
+
 def check_for_min_input_genomes(run_data):
     total_input_genomes = len(run_data.get_all_input_genome_ids())
     if total_input_genomes < 4:
@@ -727,6 +799,44 @@ def check_path(path, flag):
             report_missing_mapping_file(path, flag)
         if flag == "--exclusion-list":
             report_missing_exclusion_list_file(path, flag)
+
+
+def resolve_and_check_genome_inputs(args):
+    """
+    Resolve -a/-g/-f/-A in place (each becomes a ResolvedInputs), mention any repeated
+    entries, and require every genome file to exist. Shared with search-annotations.
+    """
+    try:
+        args = resolve_genome_input_args(args)
+    except GenomeInputError as err:
+        report_message(str(err))
+        report_very_early_exit(suggest_help=True)
+
+    for dest, flag, kind in GENOME_INPUT_FLAGS:
+        resolved = getattr(args, dest, None)
+        if not resolved:
+            continue
+        _report_repeated_entries(resolved.duplicates, flag)
+        if kind == "files":
+            for entry in resolved.entries:
+                if not os.path.exists(entry):
+                    report_message(f'The specified input-genome file "{entry}" (passed to '
+                                   f'`{flag}`) does not exist.')
+                    report_very_early_exit()
+    return args
+
+
+def _report_repeated_entries(duplicates, flag):
+    if not duplicates:
+        return
+    plural = "y" if len(duplicates) == 1 else "ies"
+    shown = duplicates[:MAX_REPORTED_DUPLICATES]
+    lines = list(shown)
+    if len(duplicates) > len(shown):
+        lines.append(f"...and {len(duplicates) - len(shown)} more.")
+    report_message(f"The genome inputs passed to `{flag}` have {len(duplicates):,} "
+                   f"repeated entr{plural}, which will only be used once:")
+    report_message("\n".join(lines), ii="    ", si="    ")
 
 
 def check_expected_single_column_input(path, flag, get_count=False):
@@ -869,6 +979,9 @@ def build_mapping_key_lookup(run_data):
     for gd in run_data.all_input_genomes:
         if gd.provided_path:
             lookup.setdefault(gd.provided_path, gd.id)
+        # the filename basename too, which is what the `-m` help describes
+        if gd.basename:
+            lookup.setdefault(gd.basename, gd.id)
         lookup.setdefault(gd.id, gd.id)
     return lookup
 
@@ -1028,6 +1141,14 @@ def track_tools_used(args, run_data):
 
     tools_used = ToolsUsed()
 
+    # prodigal can also be set DURING processing (NCBI accessions with no protein
+    # file, genbank files without CDS), and those genomes aren't reprocessed on a
+    # resume -- so a resumed run keeps what the previous one recorded, or the
+    # prodigal citation goes missing
+    previous = getattr(run_data, "tools_used", None)
+    if previous is not None and getattr(previous, "prodigal_used", False):
+        tools_used.prodigal_used = True
+
     if args.fasta_files:
         tools_used.prodigal_used = True
     if args.add_gtdb_tax:
@@ -1052,10 +1173,6 @@ def track_tools_used(args, run_data):
 
 
 def check_input_genomes_amount(total_input_genomes, args):
-    if total_input_genomes >= 500 and total_input_genomes < 12500 and not args.no_super5:
-        message = many_genomes_notice(total_input_genomes)
-        report_notice(message)
-        time.sleep(30)
     if total_input_genomes <= 20:
         message = few_genomes_notice(total_input_genomes, args)
         report_notice(message)
@@ -1129,9 +1246,10 @@ def final_setups(args, run_data):
     run_data.seq_length_cutoff = args.seq_length_cutoff
     run_data.gene_representation_cutoff = args.gene_representation_cutoff
 
-    num_all_input_genomes = len(run_data.get_all_input_genome_ids())
-    if num_all_input_genomes > 500 and not args.no_super5:
-        run_data.use_muscle_super5 = True
+    # muscle's 'super5' is the default at any genome count (tested as accurate as the
+    # standard '-align' PPP algorithm on phylum- and domain-depth sets, and several
+    # times faster); `-X` asks for '-align' instead
+    run_data.use_muscle_super5 = not args.no_super5
 
     run_data.num_muscle_threads = args.num_muscle_threads
     run_data.nucleotide_mode = args.nucleotide_mode
@@ -1196,15 +1314,16 @@ def setup_ko_dirs(run_data):
 
 def setup_tmp_dir(args, run_data):
 
-    if args.resume:
-        if run_data.tmp_dir:
+    # resuming with recorded state: keep using its tmp dir. A `-R` with nothing
+    # recorded is a fresh start, so it falls through and honors `--tmp-dir` like one
+    # (recreated if it has since been removed, e.g. cleaned up after the stop)
+    if args.resume and run_data.tmp_dir:
+        try:
+            os.makedirs(run_data.tmp_dir, exist_ok=True)
             args.tmp_dir = run_data.tmp_dir
-        else:
-            tmp_dir = tempfile.mkdtemp(prefix = "gtt-tmp-", dir = args.output_dir)
-            args.tmp_dir = tmp_dir
-            run_data.tmp_dir = tmp_dir
-
-        return args, run_data
+            return args, run_data
+        except OSError:
+            run_data.tmp_dir = ""
 
     if args.tmp_dir:
         try:

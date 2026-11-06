@@ -22,9 +22,8 @@ a given file yields the same ID in both programs (extension and `.gz` stripping 
 """
 
 import os
-import gzip
-import shutil
 
+from gtotree.utils.misc.genome_inputs import ResolvedInputs
 from gtotree.utils.misc.general import (GenomeData, remove_file_if_exists,
                                         SOURCE_GENBANK, SOURCE_FASTA,
                                         SOURCE_AMINO_ACID)
@@ -107,8 +106,10 @@ def populate_local_genomes(args, run_data):
             setattr(run_data, attr, [])
             continue
 
+        paths = (listing.entries if isinstance(listing, ResolvedInputs)
+                 else read_paths_file(listing, label))
         genomes = []
-        for path in read_paths_file(listing, label):
+        for path in paths:
             gd = GenomeData.from_path(path, source)
             if not os.path.isfile(gd.full_path):
                 gd.mark_removed(f"{MISSED_FILE_NOT_FOUND}: {path}", stage)
@@ -125,22 +126,6 @@ def populate_local_genomes(args, run_data):
     return run_data
 
 
-def _gunzip_into_workdir(gd, work_dir):
-    """
-    Decompress a gzipped input into the working directory.
-    """
-    if not gd.full_path.endswith(".gz"):
-        return gd.full_path, False
-
-    inner_name = os.path.basename(gd.full_path)[:-3]
-    staged = os.path.join(work_dir, f"_unzipped_{gd.id}_{inner_name}")
-
-    with gzip.open(gd.full_path, "rb") as f_in, open(staged, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out, length=1024 * 1024)
-
-    return staged, True
-
-
 def process_local_genome(gd, work_dir, nucleotide_fallback=True):
     """
     Produce an amino-acid fasta for one local genome file
@@ -152,16 +137,13 @@ def process_local_genome(gd, work_dir, nucleotide_fallback=True):
       fasta       nucleotides, so always prodigal
 
     Returns (aa_path, used_prodigal). Raises TargetGenomeError with a report-ready reason
-    on failure. Gzipped inputs are staged into the working dir and cleaned up; the user's
-    input files are never modified or removed.
+    on failure. Gzipped inputs are read where they sit (no decompressed copy); the
+    user's input files are never modified or removed.
     """
     shim = _ShimRunData(work_dir)
     path = gd.full_path
-    needs_cleanup = False
 
     try:
-        path, needs_cleanup = _gunzip_into_workdir(gd, work_dir)
-
         if gd.source == SOURCE_AMINO_ACID:
             return _process_amino_acids(gd, path, shim), False
 
@@ -179,9 +161,6 @@ def process_local_genome(gd, work_dir, nucleotide_fallback=True):
         raise TargetGenomeError(f"{MISSED_UNREADABLE}: {e}") from e
     except Exception as e:  # noqa: BLE001 - surfaced per-genome, run continues
         raise TargetGenomeError(f"unexpected failure: {e}") from e
-    finally:
-        if needs_cleanup:
-            remove_file_if_exists(path)
 
 
 def _process_amino_acids(gd, path, shim):

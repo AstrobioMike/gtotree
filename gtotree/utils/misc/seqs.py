@@ -5,7 +5,8 @@ from Bio import SeqIO # type: ignore
 import subprocess
 from gtotree.utils.misc.general import (remove_file_if_exists,
                                    file_is_usable_else_clear,
-                                   atomic_write_text)
+                                   atomic_write_text,
+                                   open_maybe_gzipped)
 from gtotree.utils.misc.stages import SCGRemovalStage
 
 
@@ -43,12 +44,17 @@ def fasta_has_single_record(path) -> bool:
 
 def _filter_and_rename_fasta(outpath, infile, prefix, max_length):
     num = 0
-    with open(outpath, "w") as outfile, open(infile) as in_file:
+    with open(outpath, "w") as outfile, open_maybe_gzipped(infile) as in_file:
         for record in SeqIO.parse(in_file, "fasta"):
-            if len(record.seq) <= max_length:
+            # '*' stop characters dropped here too, as they already are for the
+            # prodigal path (_strip_stop_chars): user `-A` files (often prodigal .faa
+            # output themselves) otherwise carried them into the alignment as a column
+            # and counted them toward `-c` lengths
+            seq = str(record.seq).replace("*", "")
+            if len(seq) <= max_length:
                 num += 1
                 header = f">{prefix}_{num}"
-                outfile.write(f"{header}\n{record.seq}\n")
+                outfile.write(f"{header}\n{seq}\n")
     return num
 
 def extract_filter_and_rename_cds_amino_acids_from_gb(prefix, input_gb, run_data, max_length = 99999):
@@ -59,7 +65,7 @@ def extract_filter_and_rename_cds_amino_acids_from_gb(prefix, input_gb, run_data
     location_terms_to_exclude = ["join", "<", ">"]
 
     try:
-        with open(input_gb) as infile, open(output_file, "w") as outfile:
+        with open_maybe_gzipped(input_gb) as infile, open(output_file, "w") as outfile:
             for rec in SeqIO.parse(infile, "genbank"):
                 genes = [gene for gene in rec.features if gene.type == "CDS"]
                 for gene in genes:
@@ -93,7 +99,7 @@ def extract_fasta_from_gb(prefix, input_gb, run_data):
     num = 0
     output_file = f"{run_data.genbank_processing_dir}/{prefix}.fasta"
 
-    with open(input_gb) as infile, open(output_file, "w") as outfile:
+    with open_maybe_gzipped(input_gb) as infile, open(output_file, "w") as outfile:
         for rec in SeqIO.parse(infile, "genbank"):
             num += 1
             outfile.write(f">{prefix}_{num}\n{rec.seq}\n")
