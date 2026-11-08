@@ -9,9 +9,9 @@ do with `--cut_ga` at the command-line invocation
 
 import os
 
-import pyhmmer  # type: ignore
-import pyhmmer.easel as easel  # type: ignore
-import pyhmmer.plan7 as plan7  # type: ignore
+# pyhmmer is imported inside the functions that use it: this module sits in the import
+# chain of the preflight checks and several `gtt` subcommands, whose `-h`/`-v` paths
+# shouldn't pay for loading it
 
 
 def profiles_missing_gathering_cutoffs(hmm_path):
@@ -20,6 +20,8 @@ def profiles_missing_gathering_cutoffs(hmm_path):
 
     Empty list means the set is usable with gathering thresholds.
     """
+    import pyhmmer.plan7 as plan7  # type: ignore
+
     missing = []
     with plan7.HMMFile(hmm_path) as hmm_file:
         for hmm in hmm_file:
@@ -40,6 +42,9 @@ def press_profiles(hmm_path, press_dir, basename):
     list(): for large sets (the Pfam path especially) holding every profile as a live
     object at once is a needless memory spike.
     """
+    import pyhmmer  # type: ignore
+    import pyhmmer.plan7 as plan7  # type: ignore
+
     base = os.path.join(press_dir, basename)
     try:
         with plan7.HMMFile(hmm_path) as hmm_file:
@@ -56,6 +61,8 @@ def _open_profiles(pressed_base, hmm_path):
     The fallback keeps every entry point working when no pressing step ran -- the
     standalone search helpers, and any caller that didn't go through the fused stage.
     """
+    import pyhmmer.plan7 as plan7  # type: ignore
+
     if pressed_base:
         try:
             return plan7.HMMPressedFile(pressed_base)
@@ -69,6 +76,9 @@ def search_one_genome(hmm_path, sequence_path, tblout_path,
     """
     Search one genome's proteins against a profile set, writing a --tblout table
     """
+    import pyhmmer  # type: ignore
+    import pyhmmer.easel as easel  # type: ignore
+
     alphabet = easel.Alphabet.amino()
 
     with easel.SequenceFile(sequence_path, digital=True, alphabet=alphabet) as seq_file:

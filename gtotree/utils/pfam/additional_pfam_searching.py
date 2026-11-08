@@ -25,7 +25,7 @@ def _pfam_search_worker(genome, run_data, aa_path=None, pressed_base=None):
     """
     try:
         return _pfam_search_worker_inner(genome, run_data, aa_path, pressed_base)
-    except BaseException as e:
+    except Exception as e:
         return {"pfam_search_failed": True, "error": f"{type(e).__name__}: {e}"}
 
 

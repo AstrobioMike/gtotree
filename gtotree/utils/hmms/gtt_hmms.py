@@ -5,8 +5,7 @@ import sys
 import argparse
 from gtotree.cli.common import CustomRichHelpFormatter, add_help, add_version_arg
 from gtotree.utils.misc.messaging import color_text, report_message
-from gtotree.utils.hmms.scg_hmms_setup import (check_hmm_location_var_is_set,
-                                              read_in_hmm_summary_table)
+# scg_hmms_setup (pandas/pyhmmer) is imported after arg parsing so `-h` stays quick
 
 
 LAYOUT_COLUMNS = ("rank", "domain", "parent")
@@ -58,6 +57,8 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    from gtotree.utils.hmms.scg_hmms_setup import read_in_hmm_summary_table
+
     print(color_text("\n                   GToTree pre-packaged HMM SCG-sets", "yellow"))
     print("    See github.com/AstrobioMike/GToTree/wiki/SCG-sets for more info\n")
 
@@ -71,6 +72,8 @@ def main():
 
 
 def get_writable_hmm_dir():
+    from gtotree.utils.hmms.scg_hmms_setup import check_hmm_location_var_is_set
+
     hmm_data_dir = check_hmm_location_var_is_set()
 
     if not os.path.isdir(hmm_data_dir):

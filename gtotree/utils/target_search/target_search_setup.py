@@ -26,7 +26,6 @@ from gtotree.utils.misc.general import (GenomeData, RunData, ToolsUsed,
                                         SOURCE_GENBANK, SOURCE_FASTA,
                                         SOURCE_AMINO_ACID,
                                         prepare_output_dir)
-from gtotree.utils.taxonomy.tax_targets import is_all_target
 from gtotree.utils.misc.target_id_checks import (check_target_id_file,
                                                  TargetIDFormatError)
 
@@ -127,6 +126,8 @@ def _check_dangling_ref_tax_args(args):
     `-w all`. Caught up front so a misunderstanding fails before any dataset is
     fetched.
     """
+    # deferred: tax_targets pulls in pyarrow, which `gtt search-annotations -h` doesn't need
+    from gtotree.utils.taxonomy.tax_targets import is_all_target
     if args.wanted_ref_tax:
         if args.target_rank is not None and any(is_all_target(t)
                                                 for t in args.wanted_ref_tax):

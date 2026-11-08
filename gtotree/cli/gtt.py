@@ -193,7 +193,7 @@ def _suppress_help_version_on_group_parsers(parser):
             break
 
 
-def build_parser():
+def build_parser(load_subcommands=True):
 
     desc = """
         Print an overview of all available gtt subcommands.
@@ -226,8 +226,9 @@ def build_parser():
             # stubs are all argcomplete needs to offer the names.
             for name in SUBCOMMAND_MAP:
                 subparsers.add_parser(name, add_help=False)
-    else:
-        # Normal (non-completion) invocation -- build the full tree.
+    elif load_subcommands:
+        # Build the full tree (every subcommand module gets imported for it, so the
+        # normal dispatch path below doesn't ask for this)
         for module_path in SUBCOMMAND_MAP.values():
             module = importlib.import_module(module_path)
             module.build_parser(parent_subparsers=subparsers)
@@ -238,14 +239,19 @@ def build_parser():
 
 
 def main():
+    import os
 
-    parser = build_parser()
-
-    try:
-        import argcomplete  # type: ignore
-        argcomplete.autocomplete(parser)
-    except ImportError:
-        pass
+    # Only tab completion needs the full parser tree. Each subcommand module brings
+    # its own imports (pandas, pyhmmer, biopython, ...), and building the tree
+    # imported all of them on every `gtt` call, so the overview, `-v`, and dispatch to
+    # one subcommand each took most of a second
+    if "_ARGCOMPLETE" in os.environ:
+        parser = build_parser()
+        try:
+            import argcomplete  # type: ignore
+            argcomplete.autocomplete(parser)
+        except ImportError:
+            pass
 
     # print the overview when called with no arguments or with -h/--help
     if len(sys.argv) == 1 or sys.argv[1] in ("-h", "--help"):
@@ -256,7 +262,7 @@ def main():
 
     # handle -v/--version before subcommand dispatch
     if subcommand in ("-v", "--version"):
-        parser.parse_args()
+        build_parser(load_subcommands=False).parse_args()
         return
 
     if subcommand not in SUBCOMMAND_MAP:

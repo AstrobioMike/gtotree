@@ -3,8 +3,7 @@ Genome/accession dereplication and quality-picking from the GTDB / NCBI Parquet
 assets
 """
 
-import pyarrow as pa # type: ignore
-import pyarrow.compute as pc # type: ignore
+# heavy imports happen inside the functions that use them so `-h` stays quick
 
 from gtotree.utils.taxonomy.tax_ranks import (RANKS, NA, REFERENCE_VALUE,
                                               rank_index, validate_derep_rank)
@@ -515,7 +514,7 @@ def _finish_derep(best, n_na_group, n_below, n_missing, n_after_floor, spec,
     return accs, len(best), warnings, attrition
 
 
-_NA_NUMBERS = pa.array(["", NA, "na"])
+_NA_NUMBERS = ("", NA, "na")
 
 
 def _num_column(tab, col):
@@ -524,13 +523,15 @@ def _num_column(tab, col):
     numbers as strings, so this is a straight cast; anything Arrow won't cast falls
     back to _num() itself, once per distinct value
     """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
     if not col or col not in tab.column_names:
         return pa.nulls(tab.num_rows, pa.float64())
     arr = tab.column(col).combine_chunks()
     if pa.types.is_floating(arr.type) or pa.types.is_integer(arr.type):
         return arr.cast(pa.float64())
     arr = arr.cast(pa.string())
-    arr = pc.if_else(pc.is_in(arr, value_set=_NA_NUMBERS), None, arr)
+    arr = pc.if_else(pc.is_in(arr, value_set=pa.array(_NA_NUMBERS)), None, arr)
     try:
         return arr.cast(pa.float64())
     except pa.ArrowInvalid:
@@ -542,6 +543,7 @@ def _num_column(tab, col):
 def _normalized_strings(tab, col):
     """lower(strip(str(value or ""))) for every row, as a Python list of distinct
     values plus per-row indices into it"""
+    import pyarrow as pa  # type: ignore
     arr = tab.column(col).combine_chunks().cast(pa.string()).fill_null("")
     enc = arr.dictionary_encode()
     norm = [v.strip().lower() for v in enc.dictionary.to_pylist()]
@@ -558,6 +560,8 @@ def _best_by_quality_columnar(tab, spec, derep_rank, min_completeness,
 
     Returns (best {group: accession}, n_na_group, n_below, n_missing, n_after_floor).
     """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
     import numpy as np  # type: ignore
 
     n = tab.num_rows
@@ -1066,6 +1070,8 @@ def _rows_for_accessions(path, source, wanted_rank, wanted_taxon, derep_rank,
     Re-read the taxon slice and return only the rows whose accession is in
     `wanted_accessions` (the derep-kept set), in sorted-accession order
     """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
     spec = SOURCES[source]
     cols = _selection_columns(spec, extra_rank=derep_rank)
     tab = select(path, source, wanted_rank, wanted_taxon,

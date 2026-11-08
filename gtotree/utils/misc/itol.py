@@ -9,7 +9,6 @@ Two entry points use these:
 """
 
 import os
-import pandas as pd  # type: ignore
 
 from gtotree.utils.misc.general import (SOURCE_ACCESSION, SOURCE_AMINO_ACID,
                                         SOURCE_FASTA, SOURCE_GENBANK,
@@ -216,6 +215,7 @@ class Selection:
 
 def load_summary(input_dir):
     """Read a finished run's summary table, or explain why we can't."""
+    import pandas as pd  # type: ignore  # deferred so `gtt itol -h` stays quick
     summary_path = os.path.join(input_dir, SUMMARY_FILENAME)
 
     if not os.path.isdir(input_dir):
@@ -344,6 +344,7 @@ def _read_hit_counts(counts_path):
     The hit-counts tsv has header: genome_id, total_gene_count, <target ...>.
     Target columns are everything after the first two.
     """
+    import pandas as pd  # type: ignore  # deferred so `gtt itol -h` stays quick
     df = pd.read_csv(counts_path, sep="\t", header=0, dtype={"genome_id": str},
                      keep_default_na=False)
     target_ids = [c for c in df.columns if c not in ("genome_id", "total_gene_count")]
@@ -364,6 +365,7 @@ def _read_summary(summary_path):
                headers were swapped; if identical, no swap effectively happened)
     in_tree_set: genome_ids whose in_final_tree == "Yes"
     """
+    import pandas as pd  # type: ignore  # deferred so `gtt itol -h` stays quick
     # all as text, NA-detection off: an all-numeric label ("0012") or genome id
     # ("001"), or one spelled "NA", was otherwise parsed into 12.0 / nan
     df = pd.read_csv(summary_path, sep="\t", header=0, dtype=str,
@@ -441,6 +443,7 @@ def generate_input_source_itol_files(summary_path, itol_dir):
     Write one DATASET_STYLE file per input source, when a run drew from more than
     one
     """
+    import pandas as pd  # type: ignore  # deferred so `gtt itol -h` stays quick
     if not os.path.isfile(summary_path):
         return []
 

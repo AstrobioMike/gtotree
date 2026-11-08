@@ -93,3 +93,32 @@ class TestSectionDescription:
 
     def test_ncbi_gets_no_gtdb_pool_label(self):
         assert describe_gtdb_section("ncbi", "all") is None
+
+
+class TestRunInfoBannerSection:
+    """
+    The RUN INFO line for `-w` input says which GTDB pool was used. It used to be built
+    without the `--gtdb-section` value, so it read "species representatives" for a
+    `--gtdb-section all` run too.
+    """
+
+    @staticmethod
+    def _banner(monkeypatch, capsys, gtdb_section=None):
+        import argparse
+        from gtotree.utils.misc import messaging
+        monkeypatch.setattr("gtotree.utils.taxonomy.wanted_ref_tax.describe_source_version",
+                            lambda source: "GTDB v232")
+        ns = argparse.Namespace(wanted_ref_tax="Alteromonas", source="gtdb",
+                                gtdb_section=gtdb_section)
+        class RD:
+            wanted_ref_tax_selections = []
+        messaging.report_wanted_ref_tax_info(ns, RD())
+        return capsys.readouterr().out
+
+    def test_all_genomes_is_labeled_as_such(self, monkeypatch, capsys):
+        out = self._banner(monkeypatch, capsys, gtdb_section="all")
+        assert "all genomes" in out
+        assert "species representatives" not in out
+
+    def test_the_default_is_still_species_representatives(self, monkeypatch, capsys):
+        assert "species representatives" in self._banner(monkeypatch, capsys)

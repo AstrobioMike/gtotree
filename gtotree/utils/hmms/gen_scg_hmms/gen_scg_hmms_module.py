@@ -19,8 +19,7 @@ set from a finished run's output tables without redoing 1-4 (see `select_scg_tar
 import os
 from collections import Counter
 
-import pyhmmer  # type: ignore
-
+# pyhmmer is imported where used so `gtt gen-scg-hmms -h` stays quick
 from gtotree.utils.misc.general import decode_pyhmmer_text
 from gtotree.utils.pfam.get_pfam_data import HMM_FILENAME, INFO_FILENAME
 
@@ -161,6 +160,7 @@ def write_filtered_pfam_hmms(master_hmm_path, wanted_accs, out_path,
 
     Returns the list of versioned accessions actually found and written.
     """
+    import pyhmmer  # type: ignore
     wanted = set(wanted_accs)
     found = []
     tmp_path = out_path + ".part"

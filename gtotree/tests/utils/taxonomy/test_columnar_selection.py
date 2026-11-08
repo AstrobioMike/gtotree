@@ -256,13 +256,13 @@ def test_a_second_taxon_lookup_does_not_reread_the_rank_columns(tmp_path, monkey
     tax_select.find_ranks_for_taxon(str(path), "Testophyla")
 
     reads = []
-    real_read = tax_select.pq.read_table
+    real_read = pq.read_table
 
     def counting_read(p, columns=None, **kw):
         if not kw.get("filters"):
             reads.append(columns)
         return real_read(p, columns=columns, **kw)
 
-    monkeypatch.setattr(tax_select.pq, "read_table", counting_read)
+    monkeypatch.setattr(pq, "read_table", counting_read)
     assert tax_select.find_ranks_for_taxon(str(path), "G")[1] == ["genus"]
     assert reads == []

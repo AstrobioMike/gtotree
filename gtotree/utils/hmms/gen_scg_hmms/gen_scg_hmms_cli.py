@@ -16,8 +16,7 @@ import os
 import shutil
 import argparse
 
-from tqdm import tqdm  # type: ignore
-
+# heavy imports happen after arg parsing so `-h` stays quick (see the per-function imports)
 from gtotree.utils.misc.genome_inputs import GenomeInputError, resolve_genome_input_args
 from gtotree.cli.common import (CustomRichHelpFormatter, add_help, add_version_arg,
                                 run_subcommand_main)
@@ -36,14 +35,12 @@ from gtotree.utils.misc.general import (run_pooled_stage,
 from gtotree.utils.misc.stages import (GenomeRemovalStage,
                                        GENOME_REMOVAL_STAGE_ORDER,
                                        PREPROCESSING_REMOVAL_STAGES)
-from gtotree.utils.misc.summary_info import write_removed_genomes_report
 from gtotree.utils.misc import phase_stats
 from gtotree.utils.misc.messaging import (report_message, color_text, spinner,
                                      report_phase_header, REMOVED_GENOMES_FILENAME)
 from gtotree.utils.misc.data_locations import ensure_reference_data
 from gtotree.utils.taxonomy.tax_ranks import RANKS
 from gtotree.utils.taxonomy.exclusion_list import exclusion_list_help
-from gtotree.utils.taxonomy.wanted_ref_tax import resolved_gtdb_section
 from gtotree.utils.hmms.gen_scg_hmms.gen_scg_hmms_module import (
     GenSCGHMMsError,
     DEFAULT_MIN_PFAM_COVERAGE,
@@ -66,7 +63,6 @@ from gtotree.utils.hmms.gen_scg_hmms.gen_scg_hmms_genomes import (TargetGenomeEr
                                                                   relabel_and_append,
                                                                   MAX_DOWNLOAD_THREADS)
 from gtotree.utils.hmms.gen_scg_hmms.gen_scg_hmms_local import process_local_genome
-from gtotree.utils.hmms.gen_scg_hmms.gen_scg_hmms_search import search_profiles
 from gtotree.utils.hmms.gen_scg_hmms import gen_scg_hmms_outputs as outputs
 
 
@@ -133,6 +129,7 @@ def build_fingerprint(run_data, args, pfam_version=None):
     NCBI accession a local file's contents can change while its path stays the same,
     and resuming across that would silently mix old results with new input.
     """
+    from gtotree.utils.taxonomy.wanted_ref_tax import resolved_gtdb_section
     accessions = run_data.get_input_ncbi_accs()
     local_genomes = (list(run_data.genbank_files) + list(run_data.fasta_files)
                      + list(run_data.amino_acid_files))
@@ -647,6 +644,7 @@ def phase_get_amino_acids(run_data, work_dir, args, to_fetch, download_info):
     resolved and processing any local files, and combine them into a single fasta with
     genome-traceable headers
     """
+    from gtotree.utils.misc.summary_info import write_removed_genomes_report
     phase_stats.checkpoint("phase 2 start")
 
     combined_path = os.path.join(work_dir, "all-target-proteins.faa")
@@ -887,6 +885,7 @@ def phase_filter_pfams(work_dir, args, state=None, resuming=False):
 
     Returns (filtered_hmm_path, pfam_info, filtered_accs, pfam_version).
     """
+    from tqdm import tqdm  # type: ignore
     from gtotree.utils.pfam.get_pfam_data import get_pfam_data, get_stored_pfam_version
 
     # ensures the managed Pfam asset is present (downloads it once if not)
@@ -933,6 +932,8 @@ def phase_search(filtered_hmm_path, combined_path, num_genomes, args,
 
     Returns (hits_by_genome, shared_by_genome); see `search_profiles`
     """
+    from tqdm import tqdm  # type: ignore
+    from gtotree.utils.hmms.gen_scg_hmms.gen_scg_hmms_search import search_profiles
     checkpoint_path = (os.path.join(work_dir, SEARCH_CHECKPOINT_FILENAME)
                        if work_dir else None)
 
@@ -980,6 +981,7 @@ def phase_select_and_write(out_dir, source_hmm_path, hits_by_genome, genome_ids,
 
     Returns (final_hmm_path, num_targets).
     """
+    from tqdm import tqdm  # type: ignore
     from gtotree.utils.hmms.gen_scg_hmms.gen_scg_hmms_module import select_scg_targets
 
     max_shared = getattr(args, "max_shared_protein_percent",

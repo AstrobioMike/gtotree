@@ -5,9 +5,7 @@ This is mirrored in bit at bit/modules/taxonomy/lineage_lookup.py, mike,
 apply any changes there too :)
 """
 
-import pyarrow as pa # type: ignore
-import pyarrow.compute as pc # type: ignore
-import pyarrow.dataset as ds # type: ignore
+# heavy imports happen inside the functions that use them so `-h` stays quick
 from gtotree.utils.taxonomy.tax_ranks import RANKS, NA, accession_core
 
 
@@ -51,6 +49,8 @@ def lineage_from_row(row):
 
 
 def _accession_cores(column):
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
     return pc.replace_substring_regex(column.cast(pa.string()),
                                       _ACCESSION_CORE_REGEX, r"\1")
 
@@ -67,6 +67,9 @@ def gtdb_lineage_map(gtdb_table_path, accessions):
     be in the returned map. Callers fill those rows with NO_LINEAGE rather than
     treating a miss as an error; a partly-NA column is the honest answer there.
     """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
+    import pyarrow.dataset as ds  # type: ignore
     wanted_cores = {accession_core(acc) for acc in (accessions or [])}
     wanted_cores.discard("")
     if not wanted_cores:

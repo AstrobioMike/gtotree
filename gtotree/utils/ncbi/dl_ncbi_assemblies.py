@@ -22,7 +22,6 @@ import http.client
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from tqdm import tqdm # type: ignore
 
 from gtotree.utils.misc.genome_inputs import (GenomeInputError, ResolvedInputs,
                                               input_entries, resolve_accessions)
@@ -779,6 +778,7 @@ def run_download_pass(targets, run_data, desc="Progress"):
     returns (permanent_failures, transient_failures, num_skipped) where each
     failure list holds (target_link, local_dest, error) so transient ones can be retried
     """
+    from tqdm import tqdm  # type: ignore
     permanent = []
     transient = []
     num_skipped = 0

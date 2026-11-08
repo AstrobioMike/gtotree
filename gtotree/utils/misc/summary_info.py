@@ -1,5 +1,6 @@
 import os
-import pandas as pd # type: ignore
+# pandas is imported where it's used (generate_primary_summary_table, add_tax_info):
+# it costs ~0.4 s and the CLI help/version paths import this module
 from gtotree.utils.taxonomy.tax_ranks import RANKS
 from gtotree.utils.misc.general import (atomic_write_text, genome_source_label,
                                         genome_input_label)
@@ -165,6 +166,8 @@ def generate_primary_summary_table(args, run_data, out_path=None):
     """
     Write genomes-summary-info.tsv
     """
+    import pandas as pd # type: ignore
+
     m = run_data.mapping_dict
 
     report_pfam = bool(run_data.target_pfams_file)
@@ -210,6 +213,7 @@ def generate_primary_summary_table(args, run_data, out_path=None):
 
 
 def add_tax_info(df, run_data, args):
+    import pandas as pd # type: ignore
 
     # taxonomy was resolved from the hosted Parquet asset during header-updating and
     # stashed on run_data as {input_acc: {rank: value, ...}}, summary

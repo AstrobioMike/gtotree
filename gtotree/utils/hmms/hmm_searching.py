@@ -1,8 +1,7 @@
 import os
 import contextlib
-import pandas as pd # type: ignore
-from Bio import SeqIO # type: ignore
-import pyhmmer.easel as easel #type: ignore
+# pandas, Bio.SeqIO and pyhmmer are imported inside the functions that use them, so
+# the CLI help/version paths that import this module don't pay for them
 from gtotree.utils.misc.general import (search_threads_per_genome,
                                    atomic_write_text)
 from gtotree.utils.hmms.hmm_searching_engine import search_one_genome
@@ -25,7 +24,7 @@ def _hmm_search_worker(genome, run_data, aa_path=None, nt_path=None, pressed_bas
     """
     try:
         return _hmm_search_worker_inner(genome, run_data, aa_path, nt_path, pressed_base)
-    except BaseException as e:
+    except Exception as e:
         return {
             "hmm_search_failed": True,
             "extract_seqs_failed": False,
@@ -43,8 +42,8 @@ def _hmm_search_worker_inner(genome, run_data, aa_path=None, nt_path=None, press
     os.makedirs(out_dir, exist_ok=True)
     hmm_out_path = f"{out_dir}/SCG-hits-hmm.txt"
 
-    hmm_search_failed = run_hmm_search(ID, run_data, AA_path, hmm_out_path,
-                                       pressed_base=pressed_base)
+    hmm_search_failed, error = run_hmm_search(ID, run_data, AA_path, hmm_out_path,
+                                              pressed_base=pressed_base)
 
     num_SCG_hits = 0
     num_unique_SCG_hits = 0
@@ -61,7 +60,8 @@ def _hmm_search_worker_inner(genome, run_data, aa_path=None, nt_path=None, press
         write_genome_shared_gene_hits(f"{out_dir}/{GENOME_SHARED_HITS_FILENAME}",
                                       shared_gene_hits)
 
-        AA_hit_seqs_dict, extract_seqs_failed = get_seqs(dict_of_hit_gene_ids, AA_path)
+        AA_hit_seqs_dict, error = get_seqs(dict_of_hit_gene_ids, AA_path)
+        extract_seqs_failed = error is not None
 
         if not extract_seqs_failed:
             def _write_aa(f):
@@ -87,6 +87,9 @@ def _hmm_search_worker_inner(genome, run_data, aa_path=None, nt_path=None, press
         "extract_seqs_failed": bool(extract_seqs_failed),
         "num_SCG_hits": int(num_SCG_hits),
         "num_unique_SCG_hits": int(num_unique_SCG_hits),
+        # what went wrong, carried out so the removal reason says it (these used to
+        # be filed as a bare "HMM search failed" with the exception thrown away)
+        "error": error,
     }
 
 
@@ -94,16 +97,18 @@ def _apply_hmm_search_result(genome, status, run_data):
 
     hmm_search_failed = bool(status.get("hmm_search_failed", False))
     extract_seqs_failed = bool(status.get("extract_seqs_failed", False))
+    error = status.get("error")
+    detail = f" ({error})" if error else ""
 
     if hmm_search_failed:
         genome.mark_hmm_search_failed()
-        genome.mark_removed("HMM search failed", GenomeRemovalStage.HMM_SEARCH)
+        genome.mark_removed(f"HMM search failed{detail}", GenomeRemovalStage.HMM_SEARCH)
         genome.num_SCG_hits = 0
     else:
         if extract_seqs_failed:
             genome.mark_extract_seqs_failed()
             genome.num_SCG_hits = 0
-            genome.mark_removed("extracting sequences after HMM search failed",
+            genome.mark_removed(f"extracting sequences after HMM search failed{detail}",
                                 GenomeRemovalStage.HMM_SEARCH)
         else:
             genome.mark_hmm_search_done()
@@ -122,17 +127,18 @@ def run_hmm_search(id, run_data, inpath, outpath, args=None, pressed_base=None):
 
     `pressed_base` points at the once-per-run hmmpress output; without it the plain HMM
     file is read instead (slower, but keeps standalone callers working).
+
+    Returns (failed, error): error is None on success, otherwise the exception as text
+    for the removal reason. This used to print it from the worker thread instead,
+    which landed under the progress bar and never reached the run log.
     """
     try:
         search_one_genome(run_data.hmm_path, inpath, outpath,
                           pressed_base=pressed_base,
                           cpus=search_threads_per_genome(args))
-        hmm_search_failed = False
+        return False, None
     except Exception as e:
-        print(f"[SCG search failed for {id}] {type(e).__name__}: {e}")
-        hmm_search_failed = True
-
-    return hmm_search_failed
+        return True, f"{type(e).__name__}: {e}"
 
 
 def read_hmmer_results(inpath):
@@ -149,6 +155,7 @@ def read_hmmer_results(inpath):
             rows.append((fields[0], fields[2], fields[3],
                          float(fields[4]), float(fields[5])))
 
+    import pandas as pd # type: ignore
     return pd.DataFrame(rows, columns=colnames)
 
 
@@ -267,6 +274,7 @@ def get_seqs(dict_of_hit_gene_ids, path):
                 raise ValueError(f"gene '{seq_id}' was assigned to both "
                                  f"'{reverse_lookup[seq_id]}' and '{target}'")
             reverse_lookup[seq_id] = target
+        import pyhmmer.easel as easel # type: ignore
         easel_alphabet = easel.Alphabet.amino() if path.endswith(".faa") else easel.Alphabet.dna()
 
         with easel.SequenceFile(path, digital=True, alphabet=easel_alphabet) as seq_file:
@@ -277,12 +285,13 @@ def get_seqs(dict_of_hit_gene_ids, path):
                 if seq_id in reverse_lookup:
                     target_scg = reverse_lookup[seq_id]
                     hit_seqs_dict[target_scg] = easel_alphabet.decode(seq)
-        extract_seqs_failed = False
-    except Exception:
-        extract_seqs_failed = True
+        error = None
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"
         hit_seqs_dict = None
 
-    return hit_seqs_dict, extract_seqs_failed
+    # (dict, None) on success, (None, "ExcType: message") on failure
+    return hit_seqs_dict, error
 
 
 GENOME_HIT_COUNTS_HEADER = "target_SCG\tnum_hits"
@@ -385,6 +394,7 @@ def rebuild_combined_SCG_outputs(run_data):
     """
     Rebuild the combined SCG outputs from the per-genome artifacts
     """
+    from Bio import SeqIO # type: ignore
     genomes = [gd for gd in run_data.all_input_genomes
                if gd.hmm_search_done and not gd.removed]
 

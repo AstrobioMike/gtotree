@@ -155,11 +155,14 @@ def _align_one_SCG(scg, run_data):
             "trimal_failed": bool(trimal_failed),
         }
 
-    except BaseException:
+    except Exception as e:
         # never leave a half-written final behind, and never take down the pool;
-        # surface as an alignment failure so bookkeeping marks the SCG removed
+        # surface as an alignment failure so bookkeeping marks the SCG removed. The
+        # exception rides along so the reason says what actually happened (a disk-full
+        # during gap-filling, say) rather than implicating muscle
         remove_file_if_exists(final_part)
-        return {"skipped": False, "align_failed": True, "trimal_failed": False}
+        return {"skipped": False, "align_failed": True, "trimal_failed": False,
+                "error": f"{type(e).__name__}: {e}"}
 
 
 def _apply_alignment_status(scg, status, run_data):
@@ -174,7 +177,9 @@ def _apply_alignment_status(scg, status, run_data):
         return
 
     if status.get("align_failed"):
-        scg.mark_removed("alignment failed", SCGRemovalStage.ALIGNMENT)
+        error = status.get("error")
+        detail = f" ({error})" if error else ""
+        scg.mark_removed(f"alignment failed{detail}", SCGRemovalStage.ALIGNMENT)
         scg.aligned = False
     elif status.get("trimal_failed"):
         scg.mark_removed("trimal failed", SCGRemovalStage.ALIGNMENT)

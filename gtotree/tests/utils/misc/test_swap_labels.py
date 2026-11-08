@@ -101,7 +101,8 @@ class TestSwapLabels:
         def exploding_parse(*a, **kw):
             raise RuntimeError("killed mid-write")
 
-        monkeypatch.setattr(seqs.SeqIO, "parse", exploding_parse)
+        # seqs imports Bio.SeqIO inside its functions, so the patch goes on Bio itself
+        monkeypatch.setattr("Bio.SeqIO.parse", exploding_parse)
         with pytest.raises(RuntimeError):
             swap_labels_in_alignment(rd)
         monkeypatch.undo()

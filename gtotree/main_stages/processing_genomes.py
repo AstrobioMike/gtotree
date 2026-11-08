@@ -223,7 +223,7 @@ def _fused(preprocess_worker, preprocess_apply, plan):
                 if not plan.keep_genome_files:
                     _drop_genome_files(status, run_data)
             return status
-        except BaseException as e:
+        except Exception as e:
             # belt and braces: the processing workers already swallow everything,
             # but a raise here would abort the whole stage with some genomes applied
             # and some not

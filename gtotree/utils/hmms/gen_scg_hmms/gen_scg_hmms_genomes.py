@@ -14,15 +14,10 @@ and gets an amino-acid fasta for each, reusing GToTree's existing NCBI machinery
 import os
 from types import SimpleNamespace
 
-import pyarrow as pa  # type: ignore
-import pyarrow.compute as pc  # type: ignore
-import pyarrow.parquet as pq  # type: ignore
-
+# pyarrow and the NCBI table helpers are imported where used so `gtt gen-scg-hmms -h` stays quick
 from gtotree.utils.misc.gene_calling import call_genes, GenomeTooShort
 from gtotree.utils.misc.genome_inputs import ResolvedInputs
 from gtotree.utils.misc.general import run_pooled_stage, GenomeData
-from gtotree.utils.ncbi.get_ncbi_assembly_data import ncbi_data_table_path
-from gtotree.utils.ncbi.parse_ncbi_assembly_summary import resolve_base_link
 from gtotree.utils.hmms.gen_scg_hmms.gen_scg_hmms_module import GenSCGHMMsError, _remove_quietly
 
 
@@ -130,6 +125,7 @@ def resolve_download_info(accessions, table_path=None):
     table, so no cross-prefix translation is done here -- an accession is either
     in NCBI's data or it isn't.
     """
+    from gtotree.utils.ncbi.get_ncbi_assembly_data import ncbi_data_table_path
     if table_path is None:
         table_path = ncbi_data_table_path()
 
@@ -164,6 +160,10 @@ def _lookup_in_assembly_table(table_path, wanted):
     wanted accession. That's pure upside when the wanted set is clustered and simply
     doesn't fire when it isn't, so it never costs more than the full scan it replaces.
     """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
+    import pyarrow.parquet as pq  # type: ignore
+    from gtotree.utils.ncbi.parse_ncbi_assembly_summary import resolve_base_link
     info = {}
     if not wanted:
         return info

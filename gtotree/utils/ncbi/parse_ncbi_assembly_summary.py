@@ -1,8 +1,6 @@
 import re
 import os
-import pyarrow as pa # type: ignore
-import pyarrow.compute as pc # type: ignore
-import pyarrow.dataset as ds # type: ignore
+# heavy imports happen inside the functions that use them so `-h` stays quick
 from gtotree.utils.misc.general import REASON_NOT_FOUND_AT_NCBI
 from gtotree.utils.misc.stages import GenomeRemovalStage
 from gtotree.utils.misc.summary_info import write_removed_genomes_report
@@ -67,6 +65,9 @@ def _matched_accession_filter(dataset, wanted_dict):
     Build the scanner filter that selects the wanted accessions, or None if there
     are none
     """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
+    import pyarrow.dataset as ds  # type: ignore
     if not wanted_dict:
         return None
 
@@ -90,6 +91,7 @@ def parse_assembly_summary(assembly_summary_file, run_data):
     Accessions not found have their GenomeData entries marked removed, which is what
     puts them into removed-genomes.tsv. Returns the updated run_data.
     """
+    import pyarrow.dataset as ds  # type: ignore
 
     if run_data.ncbi_sub_table_path and os.path.isfile(run_data.ncbi_sub_table_path):
         return run_data

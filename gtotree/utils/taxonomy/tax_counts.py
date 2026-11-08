@@ -2,8 +2,7 @@
 COUNTING genomes and unique taxa in the GTDB / NCBI Parquet assets
 """
 
-import pyarrow.compute as pc # type: ignore
-import pyarrow.parquet as pq # type: ignore
+# heavy imports happen inside the functions that use them so `-h` stays quick
 
 from gtotree.utils.taxonomy.tax_ranks import RANKS, REFERENCE_VALUE, rank_index
 from gtotree.utils.taxonomy.tax_select import (SOURCES, assigned_mask,
@@ -64,6 +63,7 @@ def read_pool(path, source, columns, rank=None, taxon=None, rep_filter=None,
         funnels through here, so honoring it in this one place keeps the previewed
         numbers matching what a pull would actually return
     """
+    import pyarrow.parquet as pq  # type: ignore
     spec = SOURCES[source]
     domain_col = RANKS[0]
 
@@ -139,6 +139,7 @@ def _count_distinct_assigned(col):
     """
     Distinct values of a rank column, ignoring nulls and the unassigned markers
     """
+    import pyarrow.compute as pc  # type: ignore
     if len(col) == 0:
         return 0
     return pc.count_distinct(col.filter(assigned_mask(col))).as_py()
@@ -151,6 +152,7 @@ def distinct_taxa(path, source, rank_col, scope_rank=None, scope_taxon=None,
     """
     The assigned taxa present in `rank_col`, sorted
     """
+    import pyarrow.compute as pc  # type: ignore
     tab = read_pool(path, source, [rank_col], rank=scope_rank, taxon=scope_taxon,
                 rep_filter=rep_filter, accession_prefixes=accession_prefixes,
                 assembly_levels=assembly_levels, domain_assigned=domain_assigned,

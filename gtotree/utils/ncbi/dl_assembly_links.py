@@ -13,10 +13,7 @@ duplicated, so a fix to the NCBI path layout lands in both.
 
 from pathlib import Path
 
-import pyarrow as pa # type: ignore
-import pyarrow.compute as pc # type: ignore
-import pyarrow.dataset as ds # type: ignore
-
+# heavy imports happen inside the functions that use them so `-h` stays quick
 from gtotree.utils.ncbi.parse_ncbi_assembly_summary import (build_base_link,
                                                             resolve_base_link,
                                                             _clean)
@@ -82,6 +79,9 @@ def parse_ncbi_assembly_summary(assembly_summary_file, run_data):
 
     Sets run_data.num_found / num_not_found and returns run_data.
     """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
+    import pyarrow.dataset as ds  # type: ignore
     # root (version-stripped) accession -> the exact string the user asked for
     wanted_dict = {}
     for acc in run_data.wanted_accs:

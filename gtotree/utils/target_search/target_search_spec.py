@@ -116,18 +116,63 @@ class TargetSearchSpec:
         return getattr(args, self.targets_dest, None)
 
 
-def _pfam_spec():
-    from gtotree.utils.pfam.pfam_handling import get_additional_pfam_targets
-    from gtotree.utils.pfam.get_pfam_data import get_pfam_data, get_stored_pfam_version
-    from gtotree.utils.pfam.additional_pfam_searching import (write_pfam_counts_table,
-                                                              combine_all_pfam_hits)
+# The behavior callables below import their target type's modules (pandas, pyhmmer,
+# the Pfam/KO data handlers) only when called: `build_parser()` needs the specs for
+# their flags and labels, so building one must stay cheap for `-h` to stay quick.
 
-    def describe_version(run_data=None):
-        import os
-        pfam_dir = os.environ.get("Pfam_data_dir")
-        if not pfam_dir:
-            return None
-        return get_stored_pfam_version(pfam_dir)
+def _pfam_collect_targets(*args, **kwargs):
+    from gtotree.utils.pfam.pfam_handling import get_additional_pfam_targets
+    return get_additional_pfam_targets(*args, **kwargs)
+
+
+def _pfam_write_counts_table(*args, **kwargs):
+    from gtotree.utils.pfam.additional_pfam_searching import write_pfam_counts_table
+    return write_pfam_counts_table(*args, **kwargs)
+
+
+def _pfam_combine_hits(*args, **kwargs):
+    from gtotree.utils.pfam.additional_pfam_searching import combine_all_pfam_hits
+    return combine_all_pfam_hits(*args, **kwargs)
+
+
+def _pfam_ensure_data(*args, **kwargs):
+    from gtotree.utils.pfam.get_pfam_data import get_pfam_data
+    return get_pfam_data(*args, **kwargs)
+
+
+def _pfam_describe_version(run_data=None):
+    import os
+    from gtotree.utils.pfam.get_pfam_data import get_stored_pfam_version
+    pfam_dir = os.environ.get("Pfam_data_dir")
+    if not pfam_dir:
+        return None
+    return get_stored_pfam_version(pfam_dir)
+
+
+def _ko_collect_targets(run_data):
+    from gtotree.utils.ko.ko_handling import parse_kofamscan_targets
+    from gtotree.utils.ko.additional_ko_searching import write_out_failed_ko_targets
+    run_data = parse_kofamscan_targets(run_data)
+    write_out_failed_ko_targets(run_data)
+    return run_data
+
+
+def _ko_write_counts_table(*args, **kwargs):
+    from gtotree.utils.ko.additional_ko_searching import write_ko_counts_table
+    return write_ko_counts_table(*args, **kwargs)
+
+
+def _ko_combine_hits(*args, **kwargs):
+    from gtotree.utils.ko.additional_ko_searching import combine_all_ko_hits
+    return combine_all_ko_hits(*args, **kwargs)
+
+
+def _ko_ensure_data(*args, **kwargs):
+    from gtotree.utils.ko.get_kofamscan_data import get_kofamscan_data
+    return get_kofamscan_data(*args, **kwargs)
+
+
+def _pfam_spec():
 
     return TargetSearchSpec(
         subcommand="search-pfams",
@@ -159,12 +204,12 @@ def _pfam_spec():
         counts_filename="pfam-hit-counts.tsv",
         failed_targets_filename="failed-pfam-targets.txt",
 
-        collect_targets=get_additional_pfam_targets,
+        collect_targets=_pfam_collect_targets,
         plan_flag="do_pfam",
-        write_counts_table=write_pfam_counts_table,
-        combine_hits=combine_all_pfam_hits,
-        ensure_data=get_pfam_data,
-        describe_data_version=describe_version,
+        write_counts_table=_pfam_write_counts_table,
+        combine_hits=_pfam_combine_hits,
+        ensure_data=_pfam_ensure_data,
+        describe_data_version=_pfam_describe_version,
 
         required_binaries=[],
         required_env_vars=["Pfam_data_dir"],
@@ -174,17 +219,6 @@ def _pfam_spec():
 
 
 def _ko_spec():
-    from gtotree.utils.ko.ko_handling import parse_kofamscan_targets
-    from gtotree.utils.ko.get_kofamscan_data import get_kofamscan_data
-    from gtotree.utils.ko.additional_ko_searching import (write_ko_counts_table,
-                                                          combine_all_ko_hits,
-                                                          write_out_failed_ko_targets)
-
-    def collect(run_data):
-        run_data = parse_kofamscan_targets(run_data)
-        write_out_failed_ko_targets(run_data)
-        return run_data
-
     return TargetSearchSpec(
         subcommand="search-kos",
         target_label="KO",
@@ -215,11 +249,11 @@ def _ko_spec():
         counts_filename="ko-hit-counts.tsv",
         failed_targets_filename="failed-ko-targets.txt",
 
-        collect_targets=collect,
+        collect_targets=_ko_collect_targets,
         plan_flag="do_ko",
-        write_counts_table=write_ko_counts_table,
-        combine_hits=combine_all_ko_hits,
-        ensure_data=get_kofamscan_data,
+        write_counts_table=_ko_write_counts_table,
+        combine_hits=_ko_combine_hits,
+        ensure_data=_ko_ensure_data,
         describe_data_version=None,
         required_binaries=["exec_annotation"],
         required_env_vars=["KO_data_dir"],
@@ -228,10 +262,9 @@ def _ko_spec():
     )
 
 
-# Built lazily: each builder imports its target type's modules (pandas, pyhmmer,
-# the Pfam/KO data handlers), and the `gtt` dispatcher imports every subcommand
-# module to construct the parser tree. Building both eagerly at import time would
-# make every `gtt` invocation pay for both.
+# Built lazily and cached. The heavy per-type modules are imported by the behavior
+# callables above when first called, not here, so `build_parser()` (which needs the
+# specs' flags and labels) stays cheap and `gtt search-annotations -h` stays quick.
 _BUILDERS = {"pfam": _pfam_spec, "ko": _ko_spec}
 _CACHE = {}
 

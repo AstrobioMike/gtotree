@@ -29,6 +29,7 @@ import shutil
 import tempfile
 import argparse
 
+# heavy imports happen after arg parsing so `-h` stays quick (see the per-function imports)
 from gtotree.cli.common import (CustomRichHelpFormatter, add_help, add_version_arg,
                                 run_subcommand_main)
 from gtotree.utils.misc import phase_stats
@@ -41,16 +42,9 @@ from gtotree.utils.misc.resume_state import (ResumeProfile, hash_strings,
                                         STATE_VERSION)
 from gtotree.utils.misc.messaging import (report_message, color_text, spinner,
                                      report_phase_header)
-from gtotree.utils.misc.summary_info import write_removed_genomes_report
 from gtotree.utils.taxonomy.tax_ranks import RANKS
 from gtotree.utils.taxonomy.exclusion_list import exclusion_list_help
-from gtotree.utils.taxonomy.wanted_ref_tax import resolved_gtdb_section
 from gtotree.utils.misc.general import wanted_ref_tax_list
-from gtotree.utils.hmms.hmm_searching_engine import press_profiles
-from gtotree.main_stages.processing_genomes import (SearchPlan, _fused,
-                                                    genomes_needing_processing)
-from gtotree.utils.target_search import target_search_stages as stages
-from gtotree.utils.target_search import target_search_outputs as outputs
 from gtotree.utils.target_search.target_search_spec import get_spec
 from gtotree.utils.target_search.target_search_setup import (
     TargetSearchError,
@@ -133,6 +127,7 @@ def build_fingerprint(run_data, args, specs, data_versions=None):
     Target lists are hashed by CONTENTS, not path, so moving the file doesn't force a
     re-run and editing it in place does.
     """
+    from gtotree.utils.taxonomy.wanted_ref_tax import resolved_gtdb_section
     data_versions = data_versions or {}
     requested = {spec.subcommand for spec in requested_specs(args, specs)}
 
@@ -421,6 +416,8 @@ def report_finish(out_dir, run_data, active, summary_path):
     genome count is reported (genomes are shared), then a per-type line for what each
     search found and where it landed.
     """
+    from gtotree.utils.target_search import target_search_stages as stages
+    from gtotree.utils.target_search import target_search_outputs as outputs
     # every active spec searched the same surviving genome set, so any of them gives
     # the shared genome count
     any_spec = active[0][1]
@@ -535,6 +532,7 @@ def _combined_plan(args, specs):
     to press or search and no tree downstream. The fused worker already runs whichever
     of Pfam/KO are on, so one plan drives a one-pass search for both.
     """
+    from gtotree.main_stages.processing_genomes import SearchPlan
     names = {spec.subcommand for spec in specs}
     return SearchPlan(
         do_pfam=(get_spec("pfam").subcommand in names),
@@ -555,6 +553,10 @@ def phase_search_genomes(args, run_data, specs, plan):
     that finished Pfam but not KO in an interrupted run is correctly re-picked here and
     the worker skips the Pfam work it already has.
     """
+    from gtotree.utils.misc.summary_info import write_removed_genomes_report
+    from gtotree.utils.hmms.hmm_searching_engine import press_profiles
+    from gtotree.main_stages.processing_genomes import _fused, genomes_needing_processing
+    from gtotree.utils.target_search import target_search_stages as stages
     phase_stats.begin("processing and searching genomes")
 
     press_dirs = []
@@ -629,6 +631,9 @@ def run_search(args, specs=None):  # pragma: no cover
     `specs` defaults to all target types; only the ones whose flag was given are
     actually run, so passing a subset is only needed by tests.
     """
+    from gtotree.utils.target_search import target_search_stages as stages
+    from gtotree.utils.target_search import target_search_outputs as outputs
+
     if specs is None:
         specs = _all_specs()
 

@@ -1,8 +1,10 @@
 import os
 import sys
 import shutil
+import importlib
 import time
-import pandas as pd # type: ignore
+# pandas is imported where it's used (make_mapping_dict): it costs ~0.4 s and the
+# CLI help/version paths import this module
 import tempfile
 from collections import Counter
 from gtotree.utils.misc.messaging import (color_text,
@@ -200,17 +202,39 @@ def check_for_essential_deps():
     commands = ["muscle", "trimal"]
     for cmd in commands:
         program_check(cmd, essential = True)
+    check_muscle_version()
 
 
-def program_check(cmd, essential = False):
+MIN_MUSCLE_MAJOR_VERSION = 5
+
+
+def check_muscle_version():
+    """
+    The alignment step uses MUSCLE 5 syntax (`-align`, `-super5`, `-output`). A MUSCLE
+    3.8 earlier on the PATH (common on shared systems) passes the presence check but
+    then fails every single SCG alignment, after all the downloading and searching is
+    already done. If the version can't be parsed at all, this stays out of the way
+    """
+    from gtotree.utils.misc.citations import get_muscle_version
+    version = get_muscle_version()
+    major = version.split(".")[0] if version else ""
+    if major.isdigit() and int(major) < MIN_MUSCLE_MAJOR_VERSION:
+        report_message(f"GToTree needs MUSCLE version {MIN_MUSCLE_MAJOR_VERSION} or later, but the `muscle` "
+                       f"in your PATH ({shutil.which('muscle')}) reports version {version}. "
+                       f"Its command-line syntax is different, so every alignment would fail.")
+        report_very_early_exit(None, color = "yellow")
+
+
+def program_check(cmd, essential = False, needed_for = None):
     path = shutil.which(cmd)
     if not path:
         if essential:
             report_message(f"{cmd} is an essential dependency, but it's not in your PATH :(")
-            report_very_early_exit(None, color = "yellow")
+        elif needed_for:
+            report_message(f"{cmd} is needed for {needed_for}, but it's not in your PATH :(")
         else:
-            report_message(f"You specified to use {cmd}, but it's not in your PATH :(", color = "yellow")
-            report_very_early_exit(None, color = "yellow")
+            report_message(f"You specified to use {cmd}, but it's not in your PATH :(")
+        report_very_early_exit(None, color = "yellow")
 
 
 def primary_args_validation(args):
@@ -267,7 +291,67 @@ def check_for_minimum_args(args):
 
 
 def check_optional_deps(args):
-    pass
+    """
+    Dependencies that only some runs need, checked up front for the runs that do
+    """
+    check_gene_calling_dep(args)
+    check_ko_search_deps(args)
+
+
+# KOfamScan's `exec_annotation` is a ruby wrapper that calls out to HMMER's `hmmsearch`
+# and GNU `parallel` on the PATH; all three have to be there for a `-K` search to work
+KO_SEARCH_BINARIES = ("exec_annotation", "hmmsearch", "parallel")
+
+
+def check_ko_search_deps(args):
+    """
+    A KO search that can't run its binary fails per genome inside the worker and the
+    genome stays in the run, so without this a `-K` run with KOfamScan missing finished
+    looking normal, with an all-zero KO-hit table
+    """
+    if getattr(args, "target_kos_file", None):
+        for cmd in KO_SEARCH_BINARIES:
+            program_check(cmd, needed_for = "the KO searching requested with `-K` (via KOfamScan)")
+
+
+def run_may_call_genes(args):
+    """
+    Fasta input always goes through gene calling, and NCBI accessions (including those
+    pulled in with `-w`) and genbank files fall back to it when no protein sequences are
+    available for them. Only amino-acid-only input can never need it
+    """
+    return bool(args.fasta_files or args.genbank_files or args.ncbi_accessions
+                or args.wanted_ref_tax)
+
+
+def check_gene_calling_dep(args):
+    """
+    pyrodigal is imported lazily inside the gene-calling worker, and a worker's
+    failure is recorded as that one genome failing. So before this check, a missing or
+    broken pyrodigal install didn't stop the run: every genome that needed gene calling
+    was removed with "gene calling failed: ModuleNotFoundError", and the run carried on
+    (and built a tree) with whichever genomes happened to have proteins at NCBI
+    """
+    if run_may_call_genes(args):
+        module_check("pyrodigal",
+                     purpose="calling genes, which any input other than amino-acid files can need")
+
+
+def module_check(module, purpose):
+    """
+    Exit with a clear message if a required python package can't be imported here.
+
+    An actual import rather than find_spec, so a broken install (e.g. a compiled
+    extension built against a different python) is caught too, not just an absent one
+    """
+    try:
+        importlib.import_module(module)
+    except ImportError as e:
+        report_message(f"The python package `{module}` is needed for {purpose}, but it can't be "
+                       f"imported in this environment ({type(e).__name__}: {e}). It's a GToTree "
+                       f"dependency and should have been installed alongside it, e.g. with "
+                       f"`conda install -c bioconda {module}`.")
+        report_very_early_exit(None, color = "yellow")
 
 
 def check_set_values(args):
@@ -1053,6 +1137,8 @@ def make_mapping_dict(path):
     #      later (see append_pending_suffixes); if no taxonomy is added, it gets
     #      appended to the original input label.
 
+    import pandas as pd # type: ignore
+
     df = pd.read_csv(path, sep="\t", header=None, dtype=str, names=[0, 1, 2]).fillna("")
 
     # checking none of the first column entries are duplicates
@@ -1148,10 +1234,19 @@ def track_tools_used(args, run_data):
     previous = getattr(run_data, "tools_used", None)
     if previous is not None and getattr(previous, "prodigal_used", False):
         tools_used.prodigal_used = True
+    if previous is not None and getattr(previous, "gtdb_used", False):
+        tools_used.gtdb_used = True
 
     if args.fasta_files:
         tools_used.prodigal_used = True
     if args.add_gtdb_tax:
+        tools_used.gtdb_used = True
+    # `-w` draws its genome list from GTDB with the default `--source gtdb`, and an
+    # auto-picked SCG set is chosen from GTDB's taxonomy either way; the citation used
+    # to be written only for `-D`
+    if getattr(args, "wanted_ref_tax", None) and (
+            (getattr(args, "source", "gtdb") or "gtdb").strip().lower() == "gtdb"
+            or getattr(args, "hmm_auto_selected", None)):
         tools_used.gtdb_used = True
     if args.tree_program == "FastTreeMP" or args.tree_program == "FastTree":
         tools_used.fasttree_used = True

@@ -126,16 +126,16 @@ def test_resolve_handles_a_missing_score_by_losing():
 def test_get_seqs_refuses_a_gene_assigned_twice(tmp_path):
     faa = tmp_path / "g.faa"
     faa.write_text(">g_1\nMKTAYIAKQR\n")
-    seqs, failed = get_seqs({"A": "g_1", "B": "g_1"}, str(faa))
-    assert failed is True
+    seqs, error = get_seqs({"A": "g_1", "B": "g_1"}, str(faa))
+    assert error and "g_1" in error
     assert seqs is None
 
 
 def test_get_seqs_normal_case_still_works(tmp_path):
     faa = tmp_path / "g.faa"
     faa.write_text(">g_1\nMKTAYIAKQR\n>g_2\nMSSHEGGKKK\n")
-    seqs, failed = get_seqs({"A": "g_1", "B": "g_2", "C": None}, str(faa))
-    assert not failed
+    seqs, error = get_seqs({"A": "g_1", "B": "g_2", "C": None}, str(faa))
+    assert error is None
     assert seqs == {"A": "MKTAYIAKQR", "B": "MSSHEGGKKK", "C": None}
 
 

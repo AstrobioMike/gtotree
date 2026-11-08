@@ -187,17 +187,30 @@ def test_the_main_pipeline_records_a_phase_per_stage(monkeypatch, tmp_path):
         run_files_dir = str(tmp_path)
 
     rd = FakeRunData()
-    monkeypatch.setattr(gtt_main, "preflight_checks", lambda a: (a, rd))
-    monkeypatch.setattr(gtt_main, "display_initial_run_info", lambda a, r: r)
-    monkeypatch.setattr(gtt_main, "gtotree_header", lambda: "")
+    # main() imports the pipeline lazily (so `-h`/`-v` stay quick), so the patches go
+    # on the modules it imports from
+    monkeypatch.setattr("gtotree.utils.misc.preflight_checks.preflight_checks",
+                        lambda a: (a, rd))
+    monkeypatch.setattr("gtotree.utils.misc.messaging.display_initial_run_info",
+                        lambda a, r: r)
+    monkeypatch.setattr("gtotree.utils.misc.messaging.gtotree_header", lambda: "")
 
     def boom(args, run_data):
         raise MemoryError("died partway")
 
-    monkeypatch.setattr(gtt_main, "process_genomes", boom)
+    monkeypatch.setattr("gtotree.main_stages.processing_genomes.process_genomes", boom)
 
-    with pytest.raises(MemoryError):
-        gtt_main.main(args=object())
+    # main() appends the crash's traceback to the run log; keep that out of the cwd
+    from gtotree.utils.misc.context import log_file_var
+    token = log_file_var.set(str(tmp_path / "gtotree-runlog.txt"))
+
+    try:
+        with pytest.raises(MemoryError):
+            gtt_main.main(args=object())
+    finally:
+        log_file_var.reset(token)
+
+    assert "died partway" in (tmp_path / "gtotree-runlog.txt").read_text()
 
     written = tmp_path / phase_stats.STATS_FILENAME
     assert written.exists(), "no phase table written for a failed run"

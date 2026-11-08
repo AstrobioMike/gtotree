@@ -550,3 +550,153 @@ class TestSCGGenomeFilteringReporting:
         rd = self._eroded(kept=5)
         rd.gene_representation_cutoff = None
         assert _render(messaging.report_SCG_genome_filtering_update, rd) == ""
+
+
+class TestNcbiFailureCategories:
+    """
+    The NCBI report's sub-counts are counted from the removal stage, like every other
+    per-source report, and partition the removed accessions.
+
+    The bug these specify: they used to key off the acc_was_found/acc_was_downloaded
+    flags. An accession that downloaded fine and then failed gene calling (e.g. with
+    pyrodigal not installed) was removed at NCBI_DOWNLOAD with both flags True, so it
+    counted in "Overall, N of M" but in none of the itemized lines, and neither the
+    section UPDATE nor the final Notes said anything about it.
+    """
+
+    def _run_data_with_each_kind_of_failure(self):
+        rd = _run_data(n_accs=6)
+        a, b, c, d, *_ = rd.ncbi_accs
+        a.acc_was_found = False
+        a.mark_removed("not found in NCBI assembly data", GenomeRemovalStage.NCBI_LOOKUP)
+        b.acc_was_found = True
+        b.acc_was_downloaded = False
+        b.mark_removed("acc download failed", GenomeRemovalStage.NCBI_DOWNLOAD)
+        for gd in (c, d):
+            gd.acc_was_found = True
+            gd.acc_was_downloaded = True
+            gd.mark_removed("acc processing failed after download (gene calling failed: "
+                            "ModuleNotFoundError: No module named 'pyrodigal')",
+                            GenomeRemovalStage.NCBI_DOWNLOAD)
+        return rd
+
+    def test_the_categories_partition_the_removed_accessions(self):
+        rd = self._run_data_with_each_kind_of_failure()
+        not_found = rd.get_ncbi_accs_not_found()
+        not_downloaded = rd.get_ncbi_accs_not_downloaded()
+        failed_after = rd.get_ncbi_accs_failed_after_download()
+        assert not_found == ["GCF_0"]
+        assert not_downloaded == ["GCF_1"]
+        assert failed_after == ["GCF_2", "GCF_3"]
+        assert sorted(not_found + not_downloaded + failed_after) == \
+            sorted(rd.get_removed_ncbi_accs())
+
+    def test_post_download_failures_are_itemized_in_the_ncbi_update(self):
+        rd = self._run_data_with_each_kind_of_failure()
+        out = _render(messaging.report_ncbi_update, rd)
+        assert "1 not found at NCBI" in out
+        assert "1 found but not successfully downloaded" in out
+        assert "2 downloaded but failed to be successfully processed" in out
+        assert "Overall, 2 of the input 6 accessions" in out
+
+    def test_only_post_download_failures_still_get_the_itemized_wording(self):
+        rd = _run_data(n_accs=3)
+        gd = rd.ncbi_accs[0]
+        gd.acc_was_found = True
+        gd.acc_was_downloaded = True
+        gd.mark_removed("acc processing failed after download", GenomeRemovalStage.NCBI_DOWNLOAD)
+        out = _render(messaging.report_ncbi_update, rd)
+        assert "All 3 input accessions" not in out
+        assert "1 downloaded but failed to be successfully processed" in out
+        assert "Overall, 2 of the input 3 accessions" in out
+
+    def test_flags_alone_do_not_count_without_a_removal(self):
+        # a flag that was set but never followed by mark_removed is not a failure
+        rd = _run_data(n_accs=3)
+        rd.ncbi_accs[0].acc_was_downloaded = False
+        assert rd.get_ncbi_accs_not_downloaded() == []
+        assert rd.get_ncbi_accs_failed_after_download() == []
+        assert "All 3 input accessions were successfully downloaded" in \
+            _render(messaging.report_ncbi_update, rd)
+
+    def test_later_removals_do_not_leak_into_the_post_download_count(self):
+        rd = self._run_data_with_each_kind_of_failure()
+        before = _render(messaging.report_ncbi_update, rd)
+        rd.ncbi_accs[4].acc_was_downloaded = True
+        rd.ncbi_accs[4].mark_removed("too few unique SCG hits", GenomeRemovalStage.SCG_HIT_FILTER)
+        assert _render(messaging.report_ncbi_update, rd) == before
+
+
+class TestPerSourceReportsCountSearchFailures:
+    """
+    The SCG search runs inside the same stage as each source's processing, so a
+    genome that failed it is gone before that source's UPDATE prints. The per-source
+    reports used to count only the prep stage, so they printed the green "All N ...
+    and searched!" banner over genomes that had just failed the search, and the
+    overall summary a few lines later contradicted them.
+    """
+
+    def test_ncbi_update_reports_its_own_search_failures(self):
+        rd = _run_data(n_accs=5)
+        rd.ncbi_accs[0].mark_removed("HMM search failed (ValueError: bad fasta)",
+                                     GenomeRemovalStage.HMM_SEARCH)
+        out = _render(messaging.report_ncbi_update, rd)
+        assert "All 5 input accessions" not in out
+        assert "1 failed the target-gene search" in out
+        assert "(stage_removed = hmm-search)" in out
+        assert "Overall, 4 of the input 5 accessions" in out
+
+    def test_fasta_update_reports_its_own_search_failures_only(self):
+        rd = _run_data(n_accs=2)
+        rd.fasta_files = [_genome(f"fa{i}", source="nucleotide-fasta") for i in range(3)]
+        rd.update_all_input_genomes()
+        rd.fasta_files[0].mark_removed("fasta-file processing failed",
+                                       GenomeRemovalStage.FASTA_PREP)
+        rd.fasta_files[1].mark_removed("HMM search failed", GenomeRemovalStage.HMM_SEARCH)
+        # an accession's search failure is not this source's problem
+        rd.ncbi_accs[0].mark_removed("HMM search failed", GenomeRemovalStage.HMM_SEARCH)
+        out = _render(messaging.report_fasta_update, rd)
+        assert "1 failed to be successfully processed" in out
+        assert "1 failed the target-gene search" in out
+        assert "Overall, 1 of the input 3 fasta files" in out
+
+    def test_a_clean_source_still_gets_the_green_banner(self):
+        rd = _run_data(n_accs=3)
+        rd.amino_acid_files = [_genome(f"aa{i}", source="amino-acid-fasta") for i in range(2)]
+        rd.update_all_input_genomes()
+        rd.ncbi_accs[0].mark_removed("HMM search failed", GenomeRemovalStage.HMM_SEARCH)
+        assert "All 2 input amino-acid files were successfully searched!" in \
+            _render(messaging.report_AA_update, rd)
+
+
+class TestTargetSearchReports:
+    """Pfam/KO summaries branch on what failed and point at the file that exists."""
+
+    def _rd(self, found, failed):
+        rd = _run_data(n_accs=3)
+        rd.total_pfam_targets = 4
+        rd.found_pfam_targets = found
+        rd.failed_pfam_targets = failed
+        rd.pfam_results_dir_rel = "out/pfam-search-results"
+        return rd
+
+    def test_duplicate_input_lines_do_not_print_zero_failed(self):
+        # four input lines, three distinct Pfams found, nothing actually failed
+        out = _render(messaging.report_pfam_searching_update,
+                      self._rd(found=["PF1", "PF2", "PF3"], failed=[]))
+        assert "0 target Pfam(s) failed" not in out
+        assert "Genomes were searched for 3 input Pfam target(s)." in out
+
+    def test_failed_targets_pointer_names_the_results_dir(self):
+        out = _render(messaging.report_pfam_searching_update,
+                      self._rd(found=["PF1"], failed=["PF9"]))
+        assert "1 target Pfam(s) failed to be found" in out
+        assert "out/pfam-search-results/failed-pfam-targets.txt" in out
+        assert "run-files/failed-pfam-targets.txt" not in out
+
+    def test_genomes_whose_search_failed_are_mentioned(self):
+        rd = self._rd(found=["PF1"], failed=[])
+        rd.ncbi_accs[0].mark_pfam_search_failed()
+        out = _render(messaging.report_pfam_searching_update, rd)
+        assert "1 genome(s) failed the Pfam search" in out
+        assert "pfam_search_completed" in out

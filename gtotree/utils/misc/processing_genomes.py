@@ -3,7 +3,8 @@ Per-source genome processing: turn each kind of input into a filtered, renamed
 amino-acid FASTA (plus nucleotides in nucleotide mode).
 """
 
-import pandas as pd # type: ignore
+# pandas is imported where it's used (build_base_link_map): `gtt dl-ncbi-assemblies`
+# imports this module and its `-h` shouldn't pay ~0.4 s for it
 import urllib.request
 import urllib.error
 import http.client
@@ -107,7 +108,7 @@ def _process_one_ncbi_accession(acc_gd, run_data, base_link_map=None):
             "num_genes": int(num_genes or 0),
             "error": error,
         }
-    except BaseException as e:
+    except Exception as e:
         # a worker must never take down the whole pool; treat any unexpected
         # failure as a non-downloaded processing failure and let the bookkeeping
         # step mark it removed. The message is carried out with it
@@ -368,6 +369,7 @@ def build_base_link_map(run_data):
             "the NCBI accession info table couldn't be found at "
             f'"{path or "<unset>"}", so there are no download links to work from')
 
+    import pandas as pd # type: ignore
     df = pd.read_csv(path, sep="\t",
                      usecols=["target_accession", "http_base_link"])
     return dict(zip(df["target_accession"], df["http_base_link"], strict=True))
@@ -422,7 +424,7 @@ def _process_one_genbank_file(gb, run_data):
             "num_genes": int(num_genes or 0),
             "error": error,
         }
-    except BaseException as e:
+    except Exception as e:
         return {
             "done": False,
             "prodigal_used": False,
@@ -485,7 +487,7 @@ def _process_one_fasta_file(fasta, run_data):
             "num_genes": int(num_genes or 0),
             "error": error,
         }
-    except BaseException as e:
+    except Exception as e:
         return {
             "done": False,
             "was_gzipped": False,
@@ -538,7 +540,7 @@ def _process_one_amino_acid_file(AA, run_data):
             "final_nt_path": final_nt_path,
             "num_genes": int(num_genes or 0),
         }
-    except BaseException as e:
+    except Exception as e:
         return {
             "done": False,
             "was_gzipped": False,

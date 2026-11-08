@@ -4,11 +4,11 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
 from gtotree.utils.misc.messaging import wprint, color_text, report_message, report_early_exit
-import pandas as pd # type: ignore
+# pandas and pyhmmer are imported where they're used: the preflight checks import
+# this module, and the CLI help/version paths shouldn't pay for them
 from gtotree.utils.misc.general import download_with_tqdm, SCGset, decode_pyhmmer_text
 from gtotree.utils.hmms.hmm_searching_engine import profiles_missing_gathering_cutoffs
 from gtotree.utils.taxonomy.tax_ranks import RANKS, NA
-import pyhmmer #type: ignore
 
 
 # aliases that aren't simply the file stem of a packaged set
@@ -596,6 +596,7 @@ def download_prepackaged_hmm(dest_path, hmm_arg):
 def read_in_hmm_summary_table():
     hmm_data_dir = check_hmm_location_var_is_set()
     hmm_table_path = os.path.join(hmm_data_dir, "hmm-sources-and-info.tsv")
+    import pandas as pd # type: ignore
     df = pd.read_csv(hmm_table_path, sep='\t')
     return(df)
 
@@ -611,6 +612,7 @@ def get_target_hmm_url(hmm_file, hmm_arg):
 
 
 def get_SCG_hmm_targets(hmm_path):
+    import pyhmmer # type: ignore
     with pyhmmer.plan7.HMMFile(hmm_path) as hmm_file:
         hmms = list(hmm_file)
     SCG_targets = [decode_pyhmmer_text(hmm.name) for hmm in hmms]

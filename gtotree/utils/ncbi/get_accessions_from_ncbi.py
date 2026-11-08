@@ -2,7 +2,7 @@ import sys
 import os
 import argparse
 from collections import namedtuple
-import pyarrow.parquet as pq # type: ignore
+# heavy imports happen inside the functions that use them so `-h` stays quick
 from gtotree.cli.common import CustomRichHelpFormatter, add_help, add_version_arg
 from gtotree.utils.misc.messaging import report_message, wprint, color_text, spinner
 from gtotree.utils.misc.general import (write_table_tsv, write_accessions)
@@ -509,6 +509,7 @@ def _select_by_taxid(table_path, taxid, reps_only=False, assembly_levels=None):
     Select rows whose lineage carries `taxid` at any rank (checking each rank's
     *_taxid column, then the row's own taxid), returning full metadata rows.
     """
+    import pyarrow.parquet as pq  # type: ignore
     base_filters = [("refseq_category", "=", "reference genome")] if reps_only else []
     if assembly_levels:
         base_filters = base_filters + [("assembly_level", "in", set(assembly_levels))]
@@ -594,6 +595,7 @@ def _report_ncbi_date(table_path):
 
 
 def copy_ncbi_table(table_path):
+    import pyarrow.parquet as pq  # type: ignore
     out_name = "ncbi-assembly-summary-metadata.tsv"
     print("")
     with spinner("Writing NCBI table...", "", clear_on_done=True):

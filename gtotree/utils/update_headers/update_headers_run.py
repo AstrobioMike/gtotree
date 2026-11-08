@@ -28,7 +28,6 @@ import glob
 from gtotree.utils.misc.general import read_run_data, CorruptRunData, atomic_write_text
 from gtotree.utils.misc.seqs import relabel_fasta, concatenated_alignment_locations
 from gtotree.utils.misc.stages import PipelineStage
-from gtotree.utils.misc.summary_info import generate_primary_summary_table
 
 
 class UpdateHeadersError(Exception):
@@ -324,6 +323,8 @@ def write_updated_summary_table(args, run_data, out_path):
     The taxids ride along on the GenomeData loaded out of run-data.json, so this needs
     nothing from the original run's output files.
     """
+    # deferred: summary_info pulls in pandas, which `gtt update-headers -h` doesn't need
+    from gtotree.utils.misc.summary_info import generate_primary_summary_table
     generate_primary_summary_table(args, run_data, out_path=out_path)
 
 

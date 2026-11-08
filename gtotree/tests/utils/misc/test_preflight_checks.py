@@ -201,3 +201,124 @@ class TestSharedSingleColumnReader:
         assert returned == path
         assert count == 2
         assert [p.name for p in tmp_path.iterdir()] == ["in.txt"]
+
+
+class TestGeneCallingDependencyCheck:
+    """
+    pyrodigal is imported lazily in the gene-calling worker, so a missing install used
+    to show up only as every gene-called genome being removed one by one. Any run that
+    can reach gene calling has to find out at preflight instead.
+    """
+
+    @staticmethod
+    def _args(**overrides):
+        import argparse
+        base = dict(ncbi_accessions=None, genbank_files=None, fasta_files=None,
+                    amino_acid_files=None, wanted_ref_tax=None)
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    @staticmethod
+    def _break_import(monkeypatch, module):
+        from gtotree.utils.misc import preflight_checks
+        real = preflight_checks.importlib.import_module
+
+        def fake(name, *a, **kw):
+            if name == module:
+                raise ModuleNotFoundError(f"No module named '{module}'")
+            return real(name, *a, **kw)
+        monkeypatch.setattr(preflight_checks.importlib, "import_module", fake)
+
+    @pytest.mark.parametrize("inputs", [
+        dict(fasta_files="genomes.txt"),
+        dict(genbank_files="genomes.txt"),
+        dict(ncbi_accessions="accs.txt"),
+        dict(wanted_ref_tax="Alteromonas"),
+        dict(amino_acid_files="aa.txt", ncbi_accessions="accs.txt"),
+    ])
+    def test_a_run_that_may_call_genes_exits_early_without_pyrodigal(
+            self, monkeypatch, capsys, inputs):
+        from gtotree.utils.misc.preflight_checks import check_optional_deps
+        self._break_import(monkeypatch, "pyrodigal")
+
+        with pytest.raises(SystemExit):
+            check_optional_deps(self._args(**inputs))
+
+        out = capsys.readouterr().out
+        assert "pyrodigal" in out
+        assert "calling genes" in out
+
+    def test_amino_acid_only_input_does_not_need_pyrodigal(self, monkeypatch):
+        from gtotree.utils.misc.preflight_checks import check_optional_deps
+        self._break_import(monkeypatch, "pyrodigal")
+        check_optional_deps(self._args(amino_acid_files="aa.txt"))
+
+    def test_passes_when_pyrodigal_imports(self):
+        from gtotree.utils.misc.preflight_checks import check_optional_deps
+        pytest.importorskip("pyrodigal")
+        check_optional_deps(self._args(fasta_files="genomes.txt"))
+
+
+class TestKoSearchDependencyCheck:
+    """
+    `-K` runs need KOfamScan's exec_annotation plus the hmmsearch and parallel binaries
+    it shells out to. A missing one used to fail every genome's KO search inside the
+    worker and leave the run looking normal.
+    """
+
+    @staticmethod
+    def _args(**overrides):
+        import argparse
+        base = dict(ncbi_accessions=None, genbank_files=None, fasta_files=None,
+                    amino_acid_files="aa.txt", wanted_ref_tax=None, target_kos_file=None)
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    @pytest.mark.parametrize("missing", ["exec_annotation", "hmmsearch", "parallel"])
+    def test_a_ko_run_exits_early_when_a_kofamscan_binary_is_missing(
+            self, monkeypatch, capsys, missing):
+        from gtotree.utils.misc import preflight_checks
+        monkeypatch.setattr(preflight_checks.shutil, "which",
+                            lambda cmd: None if cmd == missing else f"/bin/{cmd}")
+
+        with pytest.raises(SystemExit):
+            preflight_checks.check_optional_deps(self._args(target_kos_file="kos.txt"))
+
+        out = capsys.readouterr().out
+        assert missing in out
+        assert "-K" in out
+
+    def test_without_k_the_kofamscan_binaries_are_not_required(self, monkeypatch):
+        from gtotree.utils.misc import preflight_checks
+        monkeypatch.setattr(preflight_checks.shutil, "which", lambda cmd: None)
+        preflight_checks.check_optional_deps(self._args())
+
+
+class TestMuscleVersionCheck:
+    """
+    The alignment step uses MUSCLE 5 syntax; an older muscle on the PATH would fail
+    every SCG alignment after all the processing was done.
+    """
+
+    def _with_version(self, monkeypatch, text):
+        from gtotree.utils.misc import citations
+        monkeypatch.setattr(citations, "_tool_output", lambda cmd: text)
+
+    def test_muscle_3_exits_early_and_says_what_was_found(self, monkeypatch, capsys):
+        from gtotree.utils.misc.preflight_checks import check_muscle_version
+        self._with_version(monkeypatch, "MUSCLE v3.8.1551 by Robert C. Edgar")
+        with pytest.raises(SystemExit):
+            check_muscle_version()
+        out = capsys.readouterr().out
+        assert "3.8.1551" in out
+        assert "version 5" in out
+
+    def test_muscle_5_passes(self, monkeypatch):
+        from gtotree.utils.misc.preflight_checks import check_muscle_version
+        self._with_version(monkeypatch, "muscle 5.1.linux64 []\nBuilt May 16 2023")
+        check_muscle_version()
+
+    def test_an_unparseable_version_does_not_block_the_run(self, monkeypatch):
+        from gtotree.utils.misc.preflight_checks import check_muscle_version
+        self._with_version(monkeypatch, "")
+        check_muscle_version()

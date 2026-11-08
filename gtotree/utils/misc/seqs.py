@@ -1,7 +1,8 @@
 import os
 import shutil
 import statistics
-from Bio import SeqIO # type: ignore
+# Bio.SeqIO is imported inside the functions that use it: it costs ~0.3 s (pulling in
+# numpy) and the CLI help/version paths import this module
 import subprocess
 from gtotree.utils.misc.general import (remove_file_if_exists,
                                    file_is_usable_else_clear,
@@ -34,6 +35,8 @@ def filter_and_rename_fasta(prefix, run_data, in_path, full_path = False, max_le
 
 
 def fasta_has_single_record(path) -> bool:
+    from Bio import SeqIO # type: ignore
+
     count = 0
     for _ in SeqIO.parse(path, "fasta"):
         count += 1
@@ -43,6 +46,8 @@ def fasta_has_single_record(path) -> bool:
 
 
 def _filter_and_rename_fasta(outpath, infile, prefix, max_length):
+    from Bio import SeqIO # type: ignore
+
     num = 0
     with open(outpath, "w") as outfile, open_maybe_gzipped(infile) as in_file:
         for record in SeqIO.parse(in_file, "fasta"):
@@ -58,6 +63,7 @@ def _filter_and_rename_fasta(outpath, infile, prefix, max_length):
     return num
 
 def extract_filter_and_rename_cds_amino_acids_from_gb(prefix, input_gb, run_data, max_length = 99999):
+    from Bio import SeqIO # type: ignore
 
     num = 0
     output_file = f"{run_data.ready_genome_files_dir}/{prefix}.faa"
@@ -95,6 +101,7 @@ def extract_filter_and_rename_cds_amino_acids_from_gb(prefix, input_gb, run_data
 
 
 def extract_fasta_from_gb(prefix, input_gb, run_data):
+    from Bio import SeqIO # type: ignore
 
     num = 0
     output_file = f"{run_data.genbank_processing_dir}/{prefix}.fasta"
@@ -162,6 +169,8 @@ def filter_seqs_by_length(path, cutoff):
     Drop sequences whose length is outside `cutoff` of the set's median, writing the
     survivors to a '-gene-filtered' file and returning their genome ids
     """
+    from Bio import SeqIO # type: ignore
+
     lengths = _fasta_seq_lengths(path)
     if not lengths:
         raise ValueError(f"no sequences found in {path}")
@@ -202,6 +211,8 @@ def filter_seqs_by_genome_ids(path, ids_to_remove, out_path):
     """
     Copy `path` to `out_path`, dropping records whose id is in `ids_to_remove`
     """
+    from Bio import SeqIO # type: ignore
+
     kept = 0
     with open(out_path, "w") as out_handle:
         for record in SeqIO.parse(path, "fasta"):
@@ -259,6 +270,8 @@ def add_needed_gap_seqs(run_data, inpath, outpath):
     """
     Write one record per remaining genome, gap-filling any that this SCG has no hit for
     """
+    from Bio import SeqIO # type: ignore
+
     all_needed_ids = run_data.get_all_remaining_input_genome_ids()
 
     seq_by_id = {}
@@ -376,6 +389,8 @@ def relabel_fasta(source_path, out_path, label_for):
     """
     Copy `source_path` to `out_path` with each header replaced by `label_for(header)`
     """
+    from Bio import SeqIO # type: ignore
+
     counts = {"total": 0, "changed": 0}
 
     def _write_relabeled(fh):
@@ -436,5 +451,3 @@ def get_alignment_length(path):
         num_sites = len(next(f).strip())
 
     return num_sites
-
-

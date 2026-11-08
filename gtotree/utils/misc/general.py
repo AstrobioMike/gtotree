@@ -8,11 +8,13 @@ import json
 import time
 from dataclasses import dataclass, field, asdict, fields, is_dataclass
 from typing import List
-from tqdm import tqdm # type: ignore
+# tqdm is imported where it's used (_stream_once, run_pooled_stage): it costs ~30 ms
+# to import and the CLI help/version paths import this module
 import urllib.request
 import urllib.error
 import http.client
-import pyarrow as pa # type: ignore
+# pyarrow is imported where it's used (write_table_tsv): it costs ~0.1-0.2 s
+# (pulling in numpy) and the CLI help/version paths import this module
 from datetime import datetime
 from gtotree.utils.misc.messaging import (report_message, color_text, wprint)
 from gtotree.utils.misc.resume_state import invalidate_completed_from
@@ -182,6 +184,8 @@ def _stream_once(url, filename, desc, leave, floor_bytes_per_s,
     transient error rather than hanging. Network/HTTP errors propagate to the
     caller's attempt loop.
     """
+    from tqdm import tqdm # type: ignore
+
     chunk = 1024 * 256  # 256 KB reads
     start = time.monotonic()
     probed = False
@@ -744,11 +748,27 @@ class RunData:
     def remaining_ncbi_accs(self) -> List[str]:
         return [gd.id for gd in self.ncbi_accs if not gd.removed]
 
-    def get_ncbi_accs_not_downloaded(self) -> List[str]:
-        return [gd.id for gd in self.ncbi_accs if gd.acc_was_downloaded is False]
-
+    # The three NCBI-handling categories below are counted from the removal stage,
+    # like every other per-source report, and partition get_removed_ncbi_accs(). They
+    # used to key off the acc_was_found/acc_was_downloaded flags instead, so an
+    # accession that downloaded fine and then failed gene calling (removed at
+    # NCBI_DOWNLOAD with both flags True) was in the "Overall" total but in none of
+    # the sub-counts, and the run said nothing about it
     def get_ncbi_accs_not_found(self) -> List[str]:
-        return [gd.id for gd in self.ncbi_accs if gd.acc_was_found is False]
+        return [gd.id for gd in
+                self._failed_at(GenomeRemovalStage.NCBI_LOOKUP, "ncbi_accs")]
+
+    def get_ncbi_accs_not_downloaded(self) -> List[str]:
+        """Found at NCBI, but nothing could be downloaded for them"""
+        return [gd.id for gd in
+                self._failed_at(GenomeRemovalStage.NCBI_DOWNLOAD, "ncbi_accs")
+                if not gd.acc_was_downloaded]
+
+    def get_ncbi_accs_failed_after_download(self) -> List[str]:
+        """Downloaded, but failed being processed (e.g. gene calling) or searched"""
+        return [gd.id for gd in
+                self._failed_at(GenomeRemovalStage.NCBI_DOWNLOAD, "ncbi_accs")
+                if gd.acc_was_downloaded]
 
     def get_removed_ncbi_accs(self) -> List[str]:
         """Accessions dropped *during NCBI handling*"""
@@ -1260,6 +1280,8 @@ def run_pooled_stage(items, worker, apply_result, args, run_data,
         """
         return pool.submit(copy_context().run, worker, item, run_data)
 
+    from tqdm import tqdm # type: ignore
+
     remaining = iter(items)
     in_flight = {}
     every = CHECKPOINT_SECONDS if checkpoint_seconds is None else checkpoint_seconds
@@ -1407,6 +1429,7 @@ def write_table_tsv(table, out_path):
     """
     Write a pyarrow Table to a TSV, atomically
     """
+    import pyarrow as pa # type: ignore
     import pyarrow.csv as pacsv # type: ignore
 
     table = table.combine_chunks()

@@ -23,7 +23,7 @@ def _ko_search_worker(genome, run_data, aa_path=None):
     """
     try:
         return _ko_search_worker_inner(genome, run_data, aa_path)
-    except BaseException as e:
+    except Exception as e:
         return {"ko_search_failed": True, "error": f"{type(e).__name__}: {e}"}
 
 

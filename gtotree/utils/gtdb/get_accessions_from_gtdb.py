@@ -1,7 +1,7 @@
 import sys
 import os
 import argparse
-import pyarrow.parquet as pq # type: ignore
+# heavy imports happen inside the functions that use them so `-h` stays quick
 
 from gtotree.cli.common import CustomRichHelpFormatter, add_help, add_version_arg
 from gtotree.utils.misc.messaging import wprint, color_text, report_message, spinner
@@ -345,6 +345,7 @@ def _write_all(gtdb_path, representatives_source, exclude_cores=None):
     so it applies any `--exclusion-list` itself. Nothing is dereplicated here, so
     the listed genomes are simply absent from the dump.
     """
+    import pyarrow.parquet as pq  # type: ignore
     rep_filter = _rep_filter_for(representatives_source)
     filt = [(rep_filter[0], "=", rep_filter[1])] if rep_filter else None
 
@@ -618,6 +619,7 @@ def copy_gtdb_table(gtdb_path):
     Write the full GTDB metadata table (all columns in the asset) to the current
     directory as a tsv
     """
+    import pyarrow.parquet as pq  # type: ignore
     _report_gtdb_version(gtdb_path)
     out_name = "gtdb-arc-and-bac-metadata.tsv"
     print("")

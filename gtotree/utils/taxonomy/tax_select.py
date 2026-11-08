@@ -8,10 +8,7 @@ differs between sources; that difference is isolated in SourceSpec / SOURCES.
 """
 
 import os
-import pyarrow.compute as pc # type: ignore
-import pyarrow.parquet as pq # type: ignore
-
-import pyarrow as pa # type: ignore
+# heavy imports happen inside the functions that use them so `-h` stays quick
 
 from gtotree.utils.taxonomy.tax_ranks import (RANKS, NA, REFERENCE_VALUE, accession_core,
                                               accession_core_array,
@@ -132,6 +129,8 @@ def _rank_names(path, rank):
     mtime): reading and lowercasing a rank column is the slow part of resolving a
     taxon, and a run resolves one per `-w` taxon (and again for each size check)
     """
+    import pyarrow.compute as pc  # type: ignore
+    import pyarrow.parquet as pq  # type: ignore
     st = os.stat(path)
     key = (os.path.abspath(path), st.st_size, st.st_mtime_ns, rank)
     names = _RANK_NAMES_CACHE.get(key)
@@ -152,6 +151,8 @@ def _domains_for_taxon(path, canonical, ranks):
     One filtered scan of the `domain` column per rank the name occupies (usually one).
     A domain-rank taxon is its own domain, handled without a scan.
     """
+    import pyarrow.compute as pc  # type: ignore
+    import pyarrow.parquet as pq  # type: ignore
     domain_rank = RANKS[0]
     domains = set()
     for rank in ranks:
@@ -245,6 +246,7 @@ UNASSIGNED = (NA, "")
 
 
 def prefix_mask(acc_col, prefixes):
+    import pyarrow.compute as pc  # type: ignore
     mask = None
     for p in prefixes:
         m = pc.starts_with(acc_col, p)
@@ -258,6 +260,8 @@ def assigned_mask(col, assigned=True):
 
     Null, 'NA' and '' all mean "nothing assigned at this rank"
     """
+    import pyarrow as pa  # type: ignore
+    import pyarrow.compute as pc  # type: ignore
     unassigned = pa.array(list(UNASSIGNED), type=col.type)
     is_assigned = pc.and_(pc.is_valid(col),
                           pc.invert(pc.fill_null(pc.is_in(col, value_set=unassigned),
@@ -293,6 +297,7 @@ def select(path, source, rank, taxon, reps_only=False, columns=None,
     with more than one notion of "representative" (GTDB: its own species reps vs
     RefSeq reference genomes, see `rep_predicate`)
     """
+    import pyarrow.parquet as pq  # type: ignore
     spec = SOURCES[source]
     filters = [(rank, "=", taxon)]
     if domain and rank != RANKS[0]:
@@ -351,6 +356,7 @@ def present_assembly_levels(path, source, rank, taxon, domain=None, reps_only=Fa
     message can say what is there instead of only what isn't. Empty list for a source
     with no assembly-level column (GTDB).
     """
+    import pyarrow.compute as pc  # type: ignore
     spec = SOURCES[source]
     if not spec.level_col:
         return []
@@ -452,6 +458,8 @@ def live_accession_cores(ncbi_table_path):
     set of all ~4.4M cores (~1 GB, ~9 s) on every call, and `select_all_domains` and
     multi-taxon `-w` runs call it once per domain/taxon
     """
+    import pyarrow.compute as pc  # type: ignore
+    import pyarrow.parquet as pq  # type: ignore
     st = os.stat(ncbi_table_path)
     key = (os.path.abspath(ncbi_table_path), st.st_size, st.st_mtime_ns)
     cached = _LIVE_CORES_CACHE.get(key)
@@ -471,6 +479,7 @@ def live_mask(accessions, live_cores):
     Boolean mask: which `accessions` are still live at NCBI (non-empty, and their
     core is among `live_cores` from `live_accession_cores`)
     """
+    import pyarrow.compute as pc  # type: ignore
     present = pc.fill_null(pc.not_equal(accessions, ""), False)
     return pc.and_(present, pc.is_in(accession_core_array(accessions),
                                      value_set=live_cores))

@@ -493,7 +493,10 @@ def report_wanted_ref_tax_info(args, run_data):
 
     from gtotree.utils.misc.general import wanted_ref_tax_source_line
 
-    source_line = wanted_ref_tax_source_line(args.source)
+    # the section has to come along, or the line says "species representatives"
+    # (the default) no matter what `--gtdb-section` was actually set to
+    source_line = wanted_ref_tax_source_line(args.source,
+                                             getattr(args, "gtdb_section", None))
     if source_line:
         print(source_line, flush=True)
 
@@ -789,11 +792,31 @@ def report_shared_gene_hits(num_conflicts, run_files_dir_rel):
         f"    Reported in {run_files_dir_rel}/SCG-shared-gene-hits.tsv")
 
 
+def search_failures_for(run_data, source_field):
+    """
+    The SCG search runs inside the same fused stage as each source's processing, so a
+    genome of that source that failed the search is already gone when the source's
+    update prints. These reports used to count only the prep stage and so announced
+    "All N ... successfully ... and searched!" over genomes that had just failed it
+    """
+    return len(run_data.genomes_removed_at(GenomeRemovalStage.HMM_SEARCH,
+                                           source=source_field))
+
+
+def search_failure_line(run_data, num_failed):
+    if num_failed == 0:
+        return ""
+    return (f"      {color_text(f"{num_failed} failed the target-gene search", "yellow")}, reported in:\n"
+            + removed_genomes_pointer(run_data, GenomeRemovalStage.HMM_SEARCH))
+
+
 def report_ncbi_update(run_data):
     num_input = len(run_data.ncbi_accs)
     num_not_found_at_ncbi = len(run_data.get_ncbi_accs_not_found())
     num_not_downloaded = len(run_data.get_ncbi_accs_not_downloaded())
-    num_removed = len(run_data.get_removed_ncbi_accs())
+    num_failed_after_download = len(run_data.get_ncbi_accs_failed_after_download())
+    num_search_failed = search_failures_for(run_data, "ncbi_accs")
+    num_removed = len(run_data.get_removed_ncbi_accs()) + num_search_failed
     num_prepared = num_input - num_removed
 
     if num_removed == 0:
@@ -806,6 +829,10 @@ def report_ncbi_update(run_data):
         if num_not_downloaded > 0:
             message += (f"      {color_text(f"{num_not_downloaded} found but not successfully downloaded", "yellow")}, reported in:\n"
                         + removed_genomes_pointer(run_data, GenomeRemovalStage.NCBI_DOWNLOAD))
+        if num_failed_after_download > 0:
+            message += (f"      {color_text(f"{num_failed_after_download} downloaded but failed to be successfully processed", "yellow")}, reported in:\n"
+                        + removed_genomes_pointer(run_data, GenomeRemovalStage.NCBI_DOWNLOAD))
+        message += search_failure_line(run_data, num_search_failed)
 
         message += (f"    {color_text(f"Overall, {num_prepared} of the input {num_input} accessions were successfully downloaded and\n    searched.", "yellow")}")
 
@@ -815,12 +842,13 @@ def report_ncbi_update(run_data):
 def report_genbank_update(run_data):
     num_input = len(run_data.genbank_files)
     num_failed = len(run_data.get_failed_genbank_ids())
+    num_search_failed = search_failures_for(run_data, "genbank_files")
     num_prodigal_used = len(run_data.get_prodigal_used_genbank_ids())
 
     prodigal_note = (f"{color_text(f"{num_prodigal_used} had no CDS entries", "yellow")}, "
                      "so prodigal was used on the nucleotide sequences.")
 
-    if num_failed == 0:
+    if num_failed == 0 and num_search_failed == 0:
         message = color_text(f"All {num_input} input genbank files were successfully parsed and searched!".center(82), "green")
         if num_prodigal_used > 0:
             message += f"\n\n    {prodigal_note}"
@@ -828,9 +856,12 @@ def report_genbank_update(run_data):
         message = f"    Of the input genomes provided as {color_text("genbank files", "yellow")}:\n\n"
         if num_prodigal_used > 0:
             message += f"      {prodigal_note}\n\n"
-        message += (f"      {color_text(f"{num_failed} failed to be successfully parsed", "yellow")}, reported in:\n"
-                    + removed_genomes_pointer(run_data, GenomeRemovalStage.GENBANK_PREP))
-        message += (f"    {color_text(f"Overall, {num_input - num_failed} of the input {num_input} genbank files were successfully parsed and\n    searched.", "yellow")}")
+        if num_failed > 0:
+            message += (f"      {color_text(f"{num_failed} failed to be successfully parsed", "yellow")}, reported in:\n"
+                        + removed_genomes_pointer(run_data, GenomeRemovalStage.GENBANK_PREP))
+        message += search_failure_line(run_data, num_search_failed)
+        num_prepared = num_input - num_failed - num_search_failed
+        message += (f"    {color_text(f"Overall, {num_prepared} of the input {num_input} genbank files were successfully parsed and\n    searched.", "yellow")}")
 
     report_update(message)
 
@@ -838,28 +869,36 @@ def report_genbank_update(run_data):
 def report_fasta_update(run_data):
     num_input = len(run_data.fasta_files)
     num_failed = len(run_data.get_failed_fasta_ids())
+    num_search_failed = search_failures_for(run_data, "fasta_files")
 
-    if num_failed == 0:
+    if num_failed == 0 and num_search_failed == 0:
         message = (f"{color_text(f"All {num_input} input fasta files were successfully prepared and searched!".center(82), "green")}")
     else:
         message = f"    Of the input genomes provided as {color_text("fasta files", "yellow")}:\n\n"
-        message += (f"      {color_text(f"{num_failed} failed to be successfully processed and searched", "yellow")}, reported in:\n"
-                    + removed_genomes_pointer(run_data, GenomeRemovalStage.FASTA_PREP))
-        message += (f"    {color_text(f"Overall, {num_input - num_failed} of the input {num_input} fasta files were successfully processed and \n    searched.", "yellow")}")
+        if num_failed > 0:
+            message += (f"      {color_text(f"{num_failed} failed to be successfully processed", "yellow")}, reported in:\n"
+                        + removed_genomes_pointer(run_data, GenomeRemovalStage.FASTA_PREP))
+        message += search_failure_line(run_data, num_search_failed)
+        num_prepared = num_input - num_failed - num_search_failed
+        message += (f"    {color_text(f"Overall, {num_prepared} of the input {num_input} fasta files were successfully processed and \n    searched.", "yellow")}")
 
     report_update(message)
 
 def report_AA_update(run_data):
     num_input = len(run_data.amino_acid_files)
     num_failed = len(run_data.get_failed_amino_acid_ids())
+    num_search_failed = search_failures_for(run_data, "amino_acid_files")
 
-    if num_failed == 0:
+    if num_failed == 0 and num_search_failed == 0:
         message = (f"{color_text(f"All {num_input} input amino-acid files were successfully searched!".center(82), "green")}")
     else:
         message = f"    Of the input genomes provided as {color_text("amino-acid files", "yellow")}:\n\n"
-        message += (f"      {color_text(f"{num_failed} failed to be successfully searched", "yellow")}, reported in:\n"
-                    + removed_genomes_pointer(run_data, GenomeRemovalStage.AMINO_ACID_PREP))
-        message += (f"    {color_text(f"Overall, {num_input - num_failed} of the input {num_input} amino-acid files were successfully searched.", "yellow")}")
+        if num_failed > 0:
+            message += (f"      {color_text(f"{num_failed} failed to be successfully prepared", "yellow")}, reported in:\n"
+                        + removed_genomes_pointer(run_data, GenomeRemovalStage.AMINO_ACID_PREP))
+        message += search_failure_line(run_data, num_search_failed)
+        num_prepared = num_input - num_failed - num_search_failed
+        message += (f"    {color_text(f"Overall, {num_prepared} of the input {num_input} amino-acid files were successfully searched.", "yellow")}")
 
     report_update(message)
 
@@ -902,41 +941,52 @@ def report_genome_processing_update(run_data, searched=False):
 
 
 def report_pfam_searching_update(run_data):
-
-    num_pfam_targets = run_data.total_pfam_targets
-    num_pfams_found = len(run_data.found_pfam_targets)
-    num_pfams_failed = len(run_data.failed_pfam_targets)
-
-    if num_pfams_found == num_pfam_targets:
-        message = f"    {color_text(f"Genomes were searched for {num_pfam_targets} input Pfam target(s).", 'green')}"
-    elif num_pfams_found == 0:
-        message = f"    {color_text("None of the input Pfam targets were found in the Pfam database", 'yellow')}, reported in:\n"
-        message += f"      {run_data.run_files_dir_rel}/failed-pfam-targets.txt\n\n"
-        message += f"    {color_text("So the input genomes were not searched for any Pfams :(", 'yellow')}"
-    else:
-        message = f"    {color_text(f"{num_pfams_failed} target Pfam(s) failed to be found in the Pfam database", "yellow")}, reported in:\n"
-        message += f"      {run_data.run_files_dir_rel}/failed-pfam-targets.txt\n\n"
-        message += f"    {color_text(f"Genomes were searched for the remaining {num_pfams_found} specified Pfam(s).", 'yellow')}"
-
-    report_section_info(message)
+    report_target_search_update(
+        run_data, label="Pfam", db="Pfam database",
+        num_found=len(run_data.found_pfam_targets),
+        num_failed=len(run_data.failed_pfam_targets),
+        failed_targets_path=f"{run_data.pfam_results_dir_rel}/failed-pfam-targets.txt",
+        num_genomes_failed=sum(1 for gd in run_data.all_input_genomes if gd.pfam_search_failed),
+        summary_column="pfam_search_completed")
 
 
 def report_ko_searching_update(run_data):
+    report_target_search_update(
+        run_data, label="KO", db="KO database",
+        num_found=len(run_data.found_ko_targets),
+        num_failed=len(run_data.failed_ko_targets),
+        failed_targets_path=f"{run_data.ko_results_dir_rel}/failed-ko-targets.txt",
+        num_genomes_failed=sum(1 for gd in run_data.all_input_genomes if gd.ko_search_failed),
+        summary_column="ko_search_completed")
 
-    num_ko_targets = run_data.total_ko_targets
-    num_kos_found = len(run_data.found_ko_targets)
-    num_kos_failed = len(run_data.failed_ko_targets)
 
-    if num_kos_found == num_ko_targets:
-        message = f"    {color_text(f"Genomes were searched for {num_ko_targets} input KO target(s).", 'green')}"
-    elif num_kos_found == 0:
-        message = f"    {color_text("None of the input KO targets were found in the KO database", 'yellow')}, reported in:\n"
-        message += f"      {run_data.run_files_dir_rel}/failed-ko-targets.txt\n\n"
-        message += f"    {color_text("So the input genomes were not searched for any KOs :(", 'yellow')}"
+def report_target_search_update(run_data, label, db, num_found, num_failed,
+                                failed_targets_path, num_genomes_failed, summary_column):
+    """
+    One shape for the Pfam and KO search summaries.
+
+    Branches on what actually failed to be found: the old `found == total` test
+    compared distinct cores against input lines, so a targets file listing the same
+    Pfam with and without a version printed "0 target Pfam(s) failed to be found".
+    The failed-targets pointer also now names the directory the file is written to.
+    """
+    if num_found == 0:
+        message = f"    {color_text(f"None of the input {label} targets were found in the {db}", 'yellow')}, reported in:\n"
+        message += f"      {failed_targets_path}\n\n"
+        message += f"    {color_text(f"So the input genomes were not searched for any {label}s :(", 'yellow')}"
+    elif num_failed == 0:
+        message = f"    {color_text(f"Genomes were searched for {num_found} input {label} target(s).", 'green')}"
     else:
-        message = f"    {color_text(f"{num_kos_failed} target KO(s) failed to be found in the KO database", "yellow")}, reported in:\n"
-        message += f"      {run_data.run_files_dir_rel}/failed-ko-targets.txt\n\n"
-        message += f"    {color_text(f"Genomes were searched for the remaining {num_kos_found} specified KO(s).", 'yellow')}"
+        message = f"    {color_text(f"{num_failed} target {label}(s) failed to be found in the {db}", "yellow")}, reported in:\n"
+        message += f"      {failed_targets_path}\n\n"
+        message += f"    {color_text(f"Genomes were searched for the remaining {num_found} specified {label}(s).", 'yellow')}"
+
+    # a genome whose search itself failed stays in the run (it still has its SCGs), but
+    # it has no hits in the count table, which otherwise looks the same as "none found"
+    if num_found > 0 and num_genomes_failed > 0:
+        message += (f"\n\n    {color_text(f"{num_genomes_failed} genome(s) failed the {label} search", "yellow")} and have no hits in the\n"
+                    f"    {label} count table (marked in the {summary_column} column of\n"
+                    f"    genomes-summary-info.tsv).")
 
     report_section_info(message)
 
@@ -962,8 +1012,9 @@ def report_SCG_alignment_update(run_data):
     plural = "" if num_failed == 1 else "s"
     message = f"    {color_text(f"{num_failed} SCG-set{plural} failed to align or trim", "yellow")}, reported in:\n"
     message += f"      {run_data.run_files_dir_rel}/SCG-info.tsv\n\n"
-    message += ("    This means muscle or trimal returned an error on those sets, not that\n"
-                "    they were filtered out. Their logs were kept in:\n")
+    message += ("    This means muscle or trimal returned an error on those sets (or a step\n"
+                "    right after them failed; see the reason_removed column), not that they\n"
+                "    were filtered out. Their logs were kept in:\n")
     message += f"      {run_data.logs_dir_rel}/failed-SCG-alignments/\n\n"
     message += (f"    {color_text(f"Moving forward with the remaining {num_remaining} target gene(s).", "yellow")}")
 
@@ -1156,6 +1207,10 @@ def summarize_results(args, run_data):
         if num_accs_not_downloaded > 0:
             print(f"        {num_accs_not_downloaded} accession(s) did not download properly")
 
+        num_accs_failed_after_download = len(run_data.get_ncbi_accs_failed_after_download())
+        if num_accs_failed_after_download > 0:
+            print(f"        {num_accs_failed_after_download} accession(s) downloaded but failed to be processed")
+
         num_failed_fasta_files = len(run_data.get_failed_fasta_ids())
         if num_failed_fasta_files > 0:
             print(f"        {num_failed_fasta_files} fasta file(s) failed to be processed")
@@ -1165,6 +1220,10 @@ def summarize_results(args, run_data):
         num_failed_amino_acid_files = len(run_data.get_failed_amino_acid_ids())
         if num_failed_amino_acid_files > 0:
             print(f"        {num_failed_amino_acid_files} amino-acid file(s) failed to be processed")
+
+        num_failed_search = len(run_data.genomes_removed_at(GenomeRemovalStage.HMM_SEARCH))
+        if num_failed_search > 0:
+            print(f"        {num_failed_search} genome(s) failed the target-gene search")
 
         num_genomes_filtered_for_too_few_hits = len(run_data.get_all_input_genomes_due_for_SCG_min_hit_filtering())
         if num_genomes_filtered_for_too_few_hits > 0:
