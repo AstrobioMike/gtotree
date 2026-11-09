@@ -260,6 +260,51 @@ class TestPipelineStageCompletion:
         with pytest.raises(UnknownStage):
             rd.mark_stage_complete("align-everything")
 
+    def test_invalidating_restores_the_removals_those_stages_made(self):
+        # a resume that has to redo processing re-filters against a changed set of
+        # genomes, so `-G`/`-r` decisions from the earlier state can't stand
+        rd = _run_data()
+        g_filtered, g_failed = rd.ncbi_accs[0], rd.ncbi_accs[1]
+        g_filtered.mark_removed("too few unique SCG hits", GenomeRemovalStage.SCG_HIT_FILTER)
+        g_filtered.num_SCG_hits_after_filtering = 2
+        g_failed.mark_removed("HMM search failed", GenomeRemovalStage.HMM_SEARCH)
+        scg_no_hits, scg_gene, scg_genome, scg_align, scg_kept = rd.SCG_targets[:5]
+        scg_no_hits.mark_removed("no hits", SCGRemovalStage.NO_HITS)
+        scg_gene.mark_removed("too few genomes with hits", SCGRemovalStage.GENE_FILTER)
+        scg_genome.mark_removed("no seqs left", SCGRemovalStage.GENOME_FILTER)
+        scg_align.mark_removed("alignment failed", SCGRemovalStage.ALIGNMENT)
+        for scg in rd.SCG_targets:
+            scg.gene_length_filtered = True
+            scg.aligned = scg.trimmed = scg.ready_for_cat = True
+
+        rd.invalidate_stages_from(PipelineStage.PROCESS_GENOMES)
+
+        assert not g_filtered.removed and g_filtered.reason_removed is None
+        assert g_filtered.num_SCG_hits_after_filtering is None
+        # a per-genome failure is about that genome, not the rest of the run
+        assert g_failed.removed_at == GenomeRemovalStage.HMM_SEARCH
+        for scg in (scg_no_hits, scg_gene, scg_genome, scg_align):
+            assert not scg.removed and scg.remaining and scg.reason_removed is None
+        assert all(not scg.gene_length_filtered for scg in rd.SCG_targets)
+        assert all(scg.ready_for_cat is None for scg in rd.SCG_targets)
+
+    def test_invalidating_a_later_stage_leaves_earlier_removals_alone(self):
+        rd = _run_data()
+        rd.ncbi_accs[0].mark_removed("too few unique SCG hits",
+                                     GenomeRemovalStage.SCG_HIT_FILTER)
+        rd.SCG_targets[0].mark_removed("too few genomes with hits",
+                                       SCGRemovalStage.GENE_FILTER)
+        rd.SCG_targets[1].mark_removed("alignment failed", SCGRemovalStage.ALIGNMENT)
+        rd.SCG_targets[0].gene_length_filtered = True
+        rd.SCG_targets[1].gene_length_filtered = True
+
+        rd.invalidate_stages_from(PipelineStage.ALIGN_SCG_SETS)
+
+        assert rd.ncbi_accs[0].removed_at == GenomeRemovalStage.SCG_HIT_FILTER
+        assert rd.SCG_targets[0].removed_at == SCGRemovalStage.GENE_FILTER
+        assert rd.SCG_targets[0].gene_length_filtered
+        assert not rd.SCG_targets[1].removed
+
 
 class TestSerializationRoundTrip:
     def test_stage_attribution_and_completion_survive_run_data_json(self, tmp_path):

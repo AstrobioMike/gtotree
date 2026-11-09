@@ -14,7 +14,8 @@ from gtotree.utils.misc.messaging import (report_processing_stage,
 from gtotree.utils.misc import phase_stats
 from gtotree.utils.misc.general import write_run_data, run_pooled_stage, remove_file_if_exists
 from gtotree.utils.misc.seqs import check_target_SCGs_have_seqs
-from gtotree.utils.misc.stages import PipelineStage, SCGRemovalStage
+from gtotree.main_stages.aligning_and_preparing_SCG_sets import clear_alignment_products
+from gtotree.utils.misc.stages import PipelineStage, SCGRemovalStage, GenomeRemovalStage
 from gtotree.utils.misc.summary_info import write_removed_genomes_report
 from gtotree.utils.pfam.pfam_handling import get_additional_pfam_targets
 from gtotree.utils.ko.ko_handling import parse_kofamscan_targets
@@ -252,7 +253,11 @@ def reset_genomes_missing_SCG_artifacts(run_data):
     ext = run_data.general_ext
     n_reset = 0
     for gd in run_data.all_input_genomes:
-        if gd.removed or not gd.hmm_search_done:
+        # a genome `-G` dropped comes back into the run when this stage is invalidated
+        # (see RunData.invalidate_stages_from), so its artifacts have to be checked too
+        if gd.removed and gd.removed_at != GenomeRemovalStage.SCG_HIT_FILTER:
+            continue
+        if not gd.hmm_search_done:
             continue
         genome_dir = f"{run_data.hmm_results_dir}/{gd.id}"
         if (os.path.isfile(f"{genome_dir}/SCG-hit-counts.txt")
@@ -286,8 +291,10 @@ def process_genomes(args, run_data):
 
     if plan.do_scg and reset_genomes_missing_SCG_artifacts(run_data):
         # everything after this stage was built from the per-genome results, so it
-        # can't be trusted once some of them have to be regenerated
+        # can't be trusted once some of them have to be regenerated. The per-SCG
+        # alignments go too: the align stage trusts an existing '-final' file as "done"
         run_data.invalidate_stages_from(PipelineStage.PROCESS_GENOMES)
+        clear_alignment_products(run_data)
 
     # hmmpress the profile sets once for the whole run rather than re-parsing the HMM
     # text for every genome. The pressed files are scratch, so they live in a temp dir
@@ -417,7 +424,12 @@ def _finalize(args, run_data, plan):
         write_removed_genomes_report(run_data)
     report_genome_processing_update(run_data, searched=plan.do_scg)
 
-    if plan.do_pfam:
+    # like the SCG rebuild below, the Pfam/KO outputs were already built by the run
+    # that completed this stage; rebuilding them on a resume could only lose things
+    # (per-genome hit files in a since-wiped tmp dir, say)
+    rebuild = not run_data.stage_is_complete(PipelineStage.PROCESS_GENOMES)
+
+    if plan.do_pfam and rebuild:
         write_pfam_counts_table(run_data)
         print("") ; print("    Combining Pfam search results...")
         combine_all_pfam_hits(run_data.found_pfam_targets,
@@ -427,7 +439,7 @@ def _finalize(args, run_data, plan):
         run_data.additional_pfam_searching_done = True
         report_pfam_searching_update(run_data)
 
-    if plan.do_ko:
+    if plan.do_ko and rebuild:
         write_ko_counts_table(run_data)
         print("") ; print("    Combining KO search results...")
         combine_all_ko_hits(run_data.found_ko_targets,
@@ -441,7 +453,7 @@ def _finalize(args, run_data, plan):
     # resume isn't neutral: genomes removed LATER (by `-G`) are filtered out of the
     # rebuild, so SCG-hit-counts.tsv and the per-SCG counts would shift away from what
     # an uninterrupted run reports
-    if plan.do_scg and not run_data.stage_is_complete(PipelineStage.PROCESS_GENOMES):
+    if plan.do_scg and rebuild:
         phase_stats.checkpoint("combining: before SCG rebuild")
         run_data = rebuild_combined_SCG_outputs(run_data)
         phase_stats.checkpoint("combining: after SCG rebuild")

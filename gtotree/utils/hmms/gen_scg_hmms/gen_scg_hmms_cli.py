@@ -170,8 +170,8 @@ def build_parser(parent_subparsers=None):
             "for use with GToTree. It takes a set of target genomes as various possible inputs "
             "and/or selected by taxonomy with `--wanted-ref-tax`, finds which Pfam "
             "profiles are present in exactly one copy in a specified percentage of them, "
-            "and writes those profiles out as a new SCG-HMM set. See the wiki for "
-            "details on the process: github.com/AstrobioMike/GToTree/wiki/SCG-sets")
+            "and writes those profiles out as a new SCG-HMM set. See the docs for "
+            "details on the process: astrobiomike.org/gtotree/scg-sets")
 
     if parent_subparsers is not None:
         parser = parent_subparsers.add_parser(

@@ -152,6 +152,33 @@ def test_a_resume_after_losing_per_genome_results_reprocesses_those_genomes(tmp_
 
 
 @needs_preflight_deps
+def test_a_resume_that_regenerates_results_brings_back_genomes_removed_later(tmp_path):
+    # the `-G` removal was judged against the run as it stood; with per-genome results
+    # to regenerate, every later stage reruns, so the genome has to be back in the run
+    # (and have its own missing results regenerated) rather than staying dropped
+    import shutil
+    from gtotree.main_stages.processing_genomes import process_genomes
+    from gtotree.utils.misc.stages import PipelineStage
+
+    args, run_data = _process(tmp_path, "-A", AA_GENOMES, MOCK_HMM)
+    table = os.path.join(run_data.output_dir, "SCG-hit-counts.tsv")
+    first = open(table).read()
+    for stage in (PipelineStage.FILTER_GENES, PipelineStage.FILTER_GENOMES):
+        run_data.mark_stage_complete(stage)
+
+    dropped = next(gd for gd in run_data.all_input_genomes if gd.id == "mock-2")
+    dropped.mark_removed("too few unique SCG hits", GenomeRemovalStage.SCG_HIT_FILTER)
+    shutil.rmtree(os.path.join(run_data.hmm_results_dir, "mock-2"))
+
+    run_data = process_genomes(args, run_data)
+
+    assert not dropped.removed
+    assert dropped.hmm_search_done
+    assert open(table).read() == first
+    assert not run_data.stage_is_complete(PipelineStage.FILTER_GENOMES)
+
+
+@needs_preflight_deps
 def test_a_resume_does_not_rebuild_counts_without_genomes_removed_later(tmp_path):
     # re-running the combine on a resume dropped genomes that `-G` removed AFTER this
     # stage, so the SCG counts and SCG-hit-counts.tsv drifted from an uninterrupted run

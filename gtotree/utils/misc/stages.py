@@ -88,6 +88,22 @@ PIPELINE_STAGES = (
     PipelineStage.FINALIZE,
 )
 
+# The removals each pipeline stage decides from the *collective* state of the run (how
+# many genomes are left, which SCG-sets they hit, ...). Invalidating a stage on a
+# resume undoes these, because the decision has to be made again from the new state.
+# Per-genome failures (preprocessing, the HMM search itself) aren't listed: those are
+# about one input, not about the rest of the run, and stay removed
+GENOME_REMOVALS_MADE_BY_STAGE = {
+    PipelineStage.FILTER_GENOMES: (GenomeRemovalStage.SCG_HIT_FILTER,),
+}
+
+SCG_REMOVALS_MADE_BY_STAGE = {
+    PipelineStage.PROCESS_GENOMES: (SCGRemovalStage.NO_HITS,),
+    PipelineStage.FILTER_GENES:    (SCGRemovalStage.GENE_FILTER,),
+    PipelineStage.FILTER_GENOMES:  (SCGRemovalStage.GENOME_FILTER,),
+    PipelineStage.ALIGN_SCG_SETS:  (SCGRemovalStage.ALIGNMENT,),
+}
+
 
 class UnknownStage(ValueError):
     """A stage name that isn't in one of the vocabularies above."""

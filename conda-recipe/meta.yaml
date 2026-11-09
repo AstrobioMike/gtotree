@@ -45,13 +45,13 @@ test:
     GToTree -v
 
 about:
-  home: https://github.com/AstrobioMike/GToTree/wiki/what-is-gtotree%3F
+  home: https://astrobiomike.org/gtotree/
   license: GPL3
   summary: "GToTree: a user-friendly workflow for phylogenomics"
   dev_url: https://github.com/AstrobioMike/GToTree
-  doc_url: https://github.com/AstrobioMike/GToTree/wiki
+  doc_url: https://astrobiomike.org/gtotree/
   description: |
-    GToTree is a user-friendly workflow for phylogenomics intended to give more researchers the capability to create phylogenomic trees. The open-access Bioinformatics Journal publication is available here (https://doi.org/10.1093/bioinformatics/btz188), and documentation and examples can be found at the wiki here (https://github.com/AstrobioMike/GToTree/wiki).
+    GToTree is a user-friendly workflow for phylogenomics intended to give more researchers the capability to create phylogenomic trees. The open-access Bioinformatics Journal publication is available here (https://doi.org/10.1093/bioinformatics/btz188), and documentation and examples can be found here (https://astrobiomike.org/gtotree/).
 
     Installation should be performed as:
 

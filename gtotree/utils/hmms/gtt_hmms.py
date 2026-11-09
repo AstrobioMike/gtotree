@@ -23,7 +23,7 @@ LEFT_MARGIN = 8
 def build_parser(parent_subparsers=None):
 
     desc = ("This program lists the pre-packaged HMM SCG-sets available in GToTree. "
-            "See github.com/AstrobioMike/GToTree/wiki/SCG-sets for more info.")
+            "See astrobiomike.org/gtotree/scg-sets for more info.")
 
     if parent_subparsers is not None:
         parser = parent_subparsers.add_parser(
@@ -60,7 +60,7 @@ def main():
     from gtotree.utils.hmms.scg_hmms_setup import read_in_hmm_summary_table
 
     print(color_text("\n                   GToTree pre-packaged HMM SCG-sets", "yellow"))
-    print("    See github.com/AstrobioMike/GToTree/wiki/SCG-sets for more info\n")
+    print("    See astrobiomike.org/gtotree/scg-sets for more info\n")
 
     hmm_data_dir = get_writable_hmm_dir()
     df = read_in_hmm_summary_table()

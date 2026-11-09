@@ -347,7 +347,7 @@ ENTRIES = [
          won't include a sequence for that target from that genome in the final
          alignment. With this flag provided, GToTree will allow multiple hits and
          will just use the best hit. See here for more discussion:
-             github.com/AstrobioMike/GToTree/wiki/things-to-consider
+             astrobiomike.org/gtotree/things-to-consider
          """,
          FULL),
     ]),
@@ -518,7 +518,7 @@ def build_helpmenu(detailed=False):
     out += """
   This program takes input genomes from various sources and ultimately produces
   a phylogenomic tree. You can find detailed usage information at:
-                                  github.com/AstrobioMike/GToTree/wiki
+                                    astrobiomike.org/gtotree
 """
     if not detailed:
         out += condensed_note()

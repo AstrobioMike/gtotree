@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-This is a helper program of GToTree (https://github.com/AstrobioMike/GToTree/wiki)
+This is a helper program of GToTree (https://astrobiomike.org/gtotree/)
 to download and setup the KOFamScan (https://github.com/takaram/kofam_scan) data files for use.
 
 Default behavior: download the pre-built KOFamScan data (README, ko_list,

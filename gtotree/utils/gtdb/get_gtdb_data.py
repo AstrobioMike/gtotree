@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-This is a helper program of GToTree (https://github.com/AstrobioMike/GToTree/wiki)
+This is a helper program of GToTree (https://astrobiomike.org/gtotree/)
 for setting up reference files for the glorious Genome Taxonomy Database
 (gtdb.ecogenomic.org/).
 

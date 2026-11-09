@@ -1,86 +1,88 @@
+<p align="center">
+<a href="https://astrobiomike.org/gtotree/"><img width="600" src="docs/images/GToTree-logo.png" alt="GToTree"></a>
+</p>
 
-<img align="right" width="600" src="https://github.com/AstrobioMike/AstrobioMike.github.io/blob/master/images/GToTree-logo-1200px.png">  
-
-<br>
-<br>
-<br>
-<br>
-
-<a href="https://scholar.google.com/citations?view_op=view_citation&citation_for_view=-ONw6lsAAAAJ:_FxGoFyzp5QC"><img align="right" alt="Citations" src="https://img.shields.io/badge/Citations-500+-blue" height="22"></a>
-<br>
-<a href="https://github.com/AstrobioMike/GToTree/wiki/installation#conda-quickstart"><img align="right" alt="Conda installs" src="https://img.shields.io/badge/Conda%20installs-25k+-blue" height="22"></a>
-<br>
-<a href="https://doi.org/10.1093/bioinformatics/btz188"><img align="right" alt="DOI" src="https://img.shields.io/badge/DOI-10.1093/bioinformatics/btz188-blue" height="22"></a>
-<br>
-<a href="https://twitter.com/AstrobioMike"><img align="right" alt="Twitter Follow" src="https://img.shields.io/twitter/follow/AstrobioMike?color=blue&style=social"></a>
-<br>
+<p align="center">
+<a href="https://doi.org/10.1093/bioinformatics/btz188"><img alt="DOI" src="https://img.shields.io/badge/DOI-10.1093/bioinformatics/btz188-4967ef" height="22"></a>
+<a href="https://scholar.google.com/citations?view_op=view_citation&citation_for_view=-ONw6lsAAAAJ:_FxGoFyzp5QC"><img alt="Citations" src="https://img.shields.io/badge/Citations-650+-4967ef" height="22"></a>
+<a href="https://astrobiomike.org/gtotree/installation/#conda-quickstart"><img alt="Conda installs" src="https://img.shields.io/badge/Conda%20installs-30k+-4967ef" height="22"></a>
+<a href="https://astrobiomike.org/gtotree/"><img alt="Documentation" src="https://img.shields.io/badge/Docs-astrobiomike.org%2Fgtotree-0f9d8a" height="22"></a>
+</p>
 
 ---
 
 # GToTree: a user-friendly workflow for phylogenomics
-[GToTree](https://github.com/AstrobioMike/GToTree/wiki) is a user-friendly workflow for phylogenomics intended to give more researchers the capability to easily create phylogenomic trees. Documentation and examples can be found [at the wiki here](https://github.com/AstrobioMike/GToTree/wiki), and the open-access Bioinformatics Journal publication is available [here](https://doi.org/10.1093/bioinformatics/btz188). GToTree can be installed and run on a Mac or Linux machine, as well as on Windows within a Windows Subsystem for Linux environment 👍 
+
+GToTree is a user-friendly workflow for phylogenomics intended to give more researchers the capability to create phylogenomic trees, and to make the process of iterating on them much easier. **Documentation and examples live at [astrobiomike.org/gtotree](https://astrobiomike.org/gtotree/)**, and the open-access Bioinformatics Journal publication is available [here](https://doi.org/10.1093/bioinformatics/btz188). GToTree can be installed and run on a Mac or Linux machine, as well as on Windows within a Windows Subsystem for Linux environment 👍
+
+For an overview of what this is all about, see the [What is GToTree?](docs/what-is-gtotree.md) page. Or, to see some practical ways GToTree can be helpful, scan through the [Example usage](docs/example-usage.md) page.
 
 ---
-**A quick [conda installation](https://github.com/AstrobioMike/GToTree/wiki/installation#conda-quickstart) can be run like so:**
 
-```
+**A quick [conda installation](docs/installation.md#conda-quickstart) can be run like so:**
+
+```bash
 conda create -y -n gtotree -c astrobiomike -c conda-forge -c bioconda gtotree
 ```
 
+**And making a phylogenomic tree can be as easy as naming the group you want:**
+
+```bash
+gtotree -w Nitrospirota --add-gtdb-tax
+```
 
 ---
 
-GToTree is a more structured implementation of a workflow I would put together everytime I wanted to make a large-scale phylogenomic tree. What do I mean by large-scale? Anything from a full-blown Tree of Life with all 3 domains, down to, for example, all available genomes of *Staphylococcus* alongside new isolate genomes. At its heart it just takes in genomes and outputs an alignment and phylogenomic tree based on the specified HMM profiles. But I think its value comes from three main things: 1) its flexibility with regard to input format - taking fasta files, GenBank files, and/or NCBI accessions (So if you just recovered a bunch of new genomes and you want to see where they fit in with references, you can provide references by accession and your new genomes as fasta files.); 2) its automation of required between-tool tasks such as filtering hits by gene-length, filtering out genomes with too few hits to the target genes, and swapping genome labels for something more useful; and 3) its scalability – GToTree can turn ~1,700 input genomes into a tree in ~60 minutes on a standard laptop.
+<a href="docs/images/GToTree-overview.webp"><img class="gtt-figure" src="docs/images/GToTree-overview.webp" alt="Overview of the GToTree workflow"></a>
 
-Also included are several newly generated single-copy gene-sets for 13 different taxonomical groupings. These are presented in the [wiki](https://github.com/AstrobioMike/GToTree/wiki/SCG-sets), along with an explanation and example code/steps used in the generation of them. 
-
-GToTree utilizes helper scripts written in python, but is primarily implemented in bash. Every attempt is being made to make it portable across all variations of GNU/Unix, including on Macs, so if you run into any issues, it'd be appreciated if you could [report them](https://github.com/AstrobioMike/GToTree/issues) so the problems can be found and fixed!  
-
-<p align="center">
-<a href="https://github.com/AstrobioMike/AstrobioMike.github.io/blob/master/images/GToTree-Overview-main.png"><img src="https://github.com/AstrobioMike/AstrobioMike.github.io/blob/master/images/GToTree-Overview.png"></a>
-</p>
-
-See the ["What is GToTree?" wiki page](https://github.com/AstrobioMike/GToTree/wiki/what-is-gtotree%3F) for some more detail on the processing steps pictured above. For practical ways GToTree can be helpful, check out the [Example usage page](https://github.com/AstrobioMike/GToTree/wiki/example-usage). And for detailed information on using GToTree, see the [User guide](https://github.com/AstrobioMike/GToTree/wiki/user-guide).
+GToTree takes genomes from any combination of a taxon name (`-w`), NCBI accessions (`-a`), nucleotide (`-f`) or amino-acid (`-A`) fasta files, and GenBank files (`-g`); finds the target single-copy genes in each; filters genes and genomes; aligns, trims, and concatenates; and produces a phylogenomic tree, along with iToL-compatible annotation files for the input sources and any additional genes searched for.
 
 ---
 
-**A quick [conda installation](https://github.com/AstrobioMike/GToTree/wiki/installation#conda-quickstart) can be run like so:**
+## Documentation
 
-```
-conda create -y -n gtotree -c astrobiomike -c conda-forge -c bioconda gtotree
-```
+* [**What is GToTree?**](docs/what-is-gtotree.md)
+* [**Installation**](docs/installation.md)
+* [**Example usage**](docs/example-usage.md)
+* [**User guide**](docs/user-guide.md)
+* [**Single-copy gene-sets**](docs/scg-sets.md)
+* [**Things to consider**](docs/things-to-consider.md)
+* [**Changelog**](CHANGELOG.md)
 
+Running `gtotree -h` gives the condensed help menu, `gtotree -s` the detailed one, and `gtt` by itself an overview of all the helper subcommands.
 
 ---
 
 ## Citation information
 
-GToTree will print out a `citations.txt` file with citation information specific for every run that accounts for all programs it relies upon. Please be sure to cite the developers appropriately :)
+GToTree relies on many great programs. Along with all other outputs, it will generate a `citations.txt` file with citation information specific for every run that accounts for all programs it relies upon. Please be sure to cite the developers appropriately :)
 
 Here is an example output `citations.txt` file from a run, and how I'd cite it in the methods:
 
 ```
-GToTree v1.6.31
+GToTree v2.0.0
 Lee MD. GToTree: a user-friendly workflow for phylogenomics. Bioinformatics. 2019; (March):1-3. doi:10.1093/bioinformatics/btz188
 
-Prodigal v2.6.3
-Hyatt, D. et al. Gene and translation initiation site prediction in metagenomic sequences. Bioinformatics. 2010; 28, 2223–2230. doi.org/10.1186/1471-2105-11-119
+Genome Taxonomy Database (GTDB)
+Parks DH et al. A complete domain-to-species taxonomy for Bacteria and Archaea. Nat. Biotech. 2020. doi.org/10.1038/s41587-020-0501-8
 
-HMMER3 v3.3.2
-Eddy SR. Accelerated profile HMM searches. PLoS Comput. Biol. 2011; (7)10. doi:10.1371/journal.pcbi.1002195
+Prodigal v2.6.3 (via pyrodigal v3.6.3)
+Hyatt, D. et al. Prodigal: prokaryotic gene recognition and translation initiation site identification. BMC Bioinformatics. 2010; 11, 119. doi.org/10.1186/1471-2105-11-119
+Larralde, M. Pyrodigal: Python bindings and interface to Prodigal, an efficient method for gene prediction in prokaryotes. J. Open Source Softw. 2022; 7(72), 4296. doi.org/10.21105/joss.04296
 
-Muscle v5.1
-Edgar RC. MUSCLE v5 enables improved estimates of phylogenetic tree confidence by ensemble bootstrapping. bioRxiv. 2021. doi.org/10.1101/2021.06.20.449169
+HMMER3 v3.4 (via pyhmmer v0.11.1)
+Eddy SR. Accelerated profile HMM searches. PLoS Comput. Biol. 2011; (7)10. doi.org/10.1371/journal.pcbi.1002195
+Larralde, M., et al. PyHMMER: a Python library binding to HMMER for efficient profile hidden Markov model search. Bioinformatics. 2023. doi.org/10.1093/bioinformatics/btad214
 
-TrimAl v1.4.rev15
-Gutierrez SC. et al. TrimAl: a Tool for automatic alignment trimming. Bioinformatics. 2009; 25, 1972–1973. doi:10.1093/bioinformatics/btp348
+Muscle v5.3
+Edgar RC. MUSCLE v5 enables improved estimates of phylogenetic tree confidence by ensemble bootstrapping. bioRxiv. 2021.06.20.449169. doi.org/10.1101/2021.06.20.449169
 
-TaxonKit v0.9.0
-Shen W and Ren H. TaxonKit: a practical and efficient NCBI Taxonomy toolkit. Journal of Genetics and Genomics. 2021. doi.org/10.1016/j.jgg.2021.03.006
+TrimAl v1.5.0
+Gutierrez SC. et al. TrimAl: a Tool for automatic alignment trimming. Bioinformatics. 2009; 25, 1972-1973. doi.org/10.1093/bioinformatics/btp348
 
-FastTree 2 v2.1.11
-Price MN et al. FastTree 2 - approximately maximum-likelihood trees for large alignments. PLoS One. 2010; 5. doi:10.1371/journal.pone.0009490
+VeryFastTree v4.0.5
+Pineiro C et al. VeryFastTree: speeding up the estimation of phylogenies for large alignments through parallelization and vectorization strategies. Bioinformatics. 2020. doi.org/10.1093/bioinformatics/btaa582
 ```
 
 **Example methods text based on above citation output (be sure to modify as appropriate for your run)**
-> *The archaeal phylogenomic tree was produced with GToTree v1.6.31 (Lee 2019), using the prepackaged single-copy gene-set for archaea (76 target genes). Briefly, prodigal v2.6.3 (Hyatt et al. 2010) was used to predict genes on input genomes provided as fasta files. Target genes were identified with HMMER3 v3.2.2 (Eddy 2011), individually aligned with muscle v5.1 (Edgar 2021), trimmed with trimal v1.4.rev15 (Capella-Gutiérrez et al. 2009), and concatenated prior to phylogenetic estimation with FastTree2 v2.1.11 (Price et al. 2010). TaxonKit (Shen and Ren 2021) was used to connect full lineages to taxonomic IDs.*
+> *The phylogenomic tree was produced with GToTree v2.0.0 (Lee 2019), using the prepackaged single-copy gene-set for Nitrospirota. Briefly, reference genomes were selected by GTDB taxonomy (Parks et al. 2020), Prodigal v2.6.3 (Hyatt et al. 2010) was used to predict genes on input genomes provided as nucleotide fasta files, and target genes were identified with HMMER3 v3.4 (Eddy 2011), individually aligned with MUSCLE v5.3 (Edgar 2021), trimmed with trimAl v1.5.0 (Capella-Gutiérrez et al. 2009), and concatenated prior to phylogenetic estimation with VeryFastTree v4.0.5 (Piñeiro et al. 2020).*

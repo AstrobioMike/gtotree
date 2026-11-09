@@ -1,0 +1,56 @@
+# Docs site config (Zensical, classic variant: the Material for MkDocs look). Built by
+# docs/build-site.sh from a staging copy of the repo's Markdown (docs/*.md plus README.md as the
+# home page); published to https://astrobiomike.org/gtotree/ by .github/workflows/docs.yml.
+# The palette is in docs/stylesheets/extra.css (colors taken from the overview figure).
+site_name: GToTree
+site_description: A user-friendly workflow for phylogenomics
+site_url: https://astrobiomike.org/gtotree/
+repo_url: https://github.com/AstrobioMike/GToTree
+repo_name: AstrobioMike/GToTree
+docs_dir: .site-src
+site_dir: site
+theme:
+  name: material
+  variant: classic
+  favicon: images/favicon.png
+  icon:
+    logo: material/family-tree
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle: {icon: material/weather-sunny, name: Light mode}
+extra_css:
+  - stylesheets/extra.css
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - md_in_html
+  - toc: {permalink: true}
+  - pymdownx.superfences
+  - pymdownx.details
+plugins:
+  - search
+nav:
+  - Home: index.md
+  - What is GToTree?: what-is-gtotree.md
+  - Installation: installation.md
+  - Example usage: example-usage.md
+  - User guide: user-guide.md
+  - SCG-sets: scg-sets.md
+  - Things to consider: things-to-consider.md
+  - Changelog: https://github.com/AstrobioMike/GToTree/blob/master/CHANGELOG.md

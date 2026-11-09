@@ -63,8 +63,13 @@ def write_pfam_counts_table(run_data):
     """
     Write pfam-hit-counts.tsv from the per-genome result files
     """
+    # every genome whose Pfam search ran and worked, including ones the run dropped
+    # afterwards (`-G`, or an SCG-search failure): this table reports the Pfam search,
+    # not tree membership, and filtering on "still in the run" made its rows depend
+    # on how far the run had gotten when it was (re)written. A failed search is left
+    # out rather than shown as a row of zeros; genomes-summary-info.tsv marks it
     genomes = [gd for gd in run_data.all_input_genomes
-               if gd.pfam_search_done and not gd.removed]
+               if gd.pfam_search_done and not gd.pfam_search_failed]
 
     count_rows = []
     hit_tallies = {}

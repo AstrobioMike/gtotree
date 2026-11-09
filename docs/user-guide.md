@@ -1,19 +1,21 @@
-This page serves as the general user guide for GToTree, which may be helpful if you're looking for something specific. To jump right into practical ways GToTree can be helpful it may be more useful to start with the [Example-usage page](https://github.com/AstrobioMike/GToTree/wiki/example-usage) :) 
+# User guide
 
---- 
+This page serves as the general user guide for GToTree, which may be helpful if you're looking for something specific. To jump right into practical ways GToTree can be helpful it may be more useful to start with the [Example-usage page](example-usage.md) :)
 
-# User-Guide Contents
+---
 
-* [**Required inputs**](user-guide#required-inputs)
-  * [**Input genomes**](user-guide#input-genomes)
-  * [**Specifying which single-copy gene-set to use**](user-guide#specifying-which-single-copy-gene-set-to-use)
-* [**Outputs**](user-guide#outputs)
-  * [**Primary output files**](user-guide#primary-output-files)
-  * [**Report output files**](user-guide#report-output-files)
-* [**Optional arguments and parameters**](user-guide#optional-arguments-and-parameters)
-* [**Resuming an interrupted run**](user-guide#resuming-an-interrupted-run)
-* [**Options set for programs run**](user-guide#options-set-for-programs-run)
-* [**All programs used citation info**](user-guide#citation-information)
+## User-Guide Contents
+
+* [**Required inputs**](user-guide.md#required-inputs)
+  * [**Input genomes**](user-guide.md#input-genomes)
+  * [**Specifying which single-copy gene-set to use**](user-guide.md#specifying-which-single-copy-gene-set-to-use)
+* [**Outputs**](user-guide.md#outputs)
+  * [**Primary output files**](user-guide.md#primary-output-files)
+  * [**Report output files**](user-guide.md#report-output-files)
+* [**Optional arguments and parameters**](user-guide.md#optional-arguments-and-parameters)
+* [**Resuming an interrupted run**](user-guide.md#resuming-an-interrupted-run)
+* [**Options set for programs run**](user-guide.md#options-set-for-programs-run)
+* [**All programs used citation info**](user-guide.md#citation-information)
 
 ---
 
@@ -23,14 +25,14 @@ This page serves as the general user guide for GToTree, which may be helpful if 
 
 ---
 
-# Required Inputs
+## Required Inputs
 The minimum required inputs to GToTree are specifying the genomes you want to incorporate and specifying which single-copy gene-set to use.
 
 Genomes can be provided via any combination of a target taxon (`-w`), NCBI accessions (`-a`), GenBank files (`-g`), and/or nucleotide (`-f`) or amino-acid (`-A`) fasta files.
 
-## Input Genomes
+### Input Genomes
 
-### Reference genomes by taxonomy
+#### Reference genomes by taxonomy
 New in v2, you can ask GToTree to gather reference genomes for a taxon rather than collecting accessions yourself. Pass a taxon name to the **`-w`** argument:
 
 ```bash
@@ -45,7 +47,7 @@ gtotree -w Nitrospirota -o nitrospirota-tree
 
 This can be combined freely with the other input types, so you can add your own new genomes as fasta files alongside references pulled by taxonomy.
 
-### How the genome inputs can be given
+#### How the genome inputs can be given
 Each of **`-a`**, **`-g`**, **`-f`**, and **`-A`** takes one or more values, and they can be mixed freely:
 
 * **The genome files themselves**, e.g. `-f my-genome.fasta other-genome.fasta`, or with a shell wildcard, `-f fastas/*.fasta`
@@ -59,32 +61,32 @@ GToTree tells genome files from list files by their extension (`.fa`, `.fasta`, 
 > * put the pattern in quotes, e.g. `-f "fastas/*.fasta"`, so GToTree expands it rather than the shell
 > * or provide a single-column file listing the paths, e.g. made with `ls fastas/*.fasta > fasta-files.txt` (or `find fastas -name "*.fasta" > fasta-files.txt`, which also avoids the limit)
 
-### NCBI Accessions
-You can specify which NCBI-archived genomes you'd like to incorporate by providing NCBI assembly accessions to the **`-a`** argument, directly and/or as a single-column file holding them. Such a file can be created "manually" by searching NCBI's website and downloading a results table, or generated at the command line with `gtt get-accs-from-ncbi` or `gtt get-accs-from-gtdb` – examples are on the [examples page here](https://github.com/AstrobioMike/GToTree/wiki/example-usage#accessions).
+#### NCBI Accessions
+You can specify which NCBI-archived genomes you'd like to incorporate by providing NCBI assembly accessions to the **`-a`** argument, directly and/or as a single-column file holding them. Such a file can be created "manually" by searching NCBI's website and downloading a results table, or generated at the command line with `gtt get-accs-from-ncbi` or `gtt get-accs-from-gtdb` – examples are on the [examples page here](example-usage.md#accessions).
 
 * Those provided can have version numbers (what comes after the "." in the accession, e.g. GCF_000153765.1), or they can be version-less (e.g. GCF_000153765). In the case where no version is provided, GToTree will automatically take the newest released version of that accession.
 * If any of the provided accessions cannot be found at NCBI, they will be reported in `run-files/removed-genomes.tsv`.
 
-### GenBank files
+#### GenBank files
 GenBank files are passed to the **`-g`** argument: the files themselves, a pattern, and/or a single-column file holding the file names (or [paths](https://astrobiomike.github.io/unix/basics#absolute-vs-relative-path)) of each GenBank file you'd like incorporated.
 
-### Fasta files
+#### Fasta files
 Nucleotide fasta files are provided the same ways as the GenBank files, but passed to the **`-f`** argument. Genes will be called with [Prodigal](https://github.com/hyattpd/Prodigal) (via [pyrodigal](https://github.com/althonos/pyrodigal)).
 
-### Amino-acid files
+#### Amino-acid files
 Amino-acid files are provided the same ways, but passed to the **`-A`** argument. Each file should hold the proteins for one genome.
 
-## Specifying which single-copy gene-set to use
-GToTree needs to know which SCG-set to use – passed with the **`-H`** flag. There are 46 packaged with the program (discussed in more detail [here](https://github.com/AstrobioMike/GToTree/wiki/scg-sets)). You can view which are available by running **`gtt hmms`**, and you don't need to specify a full path, just the name as printed there (e.g. `-H Bacteria`). You can also pass a path to your own HMM file.
+### Specifying which single-copy gene-set to use
+GToTree needs to know which SCG-set to use – passed with the **`-H`** flag. There are 46 packaged with the program (discussed in more detail [here](scg-sets.md)). You can view which are available by running **`gtt hmms`**, and you don't need to specify a full path, just the name as printed there (e.g. `-H Bacteria`). You can also pass a path to your own HMM file.
 
 > **`-H` is optional when `-w` is used.** If you provide a target taxon and don't specify `-H`, GToTree selects an appropriate packaged set automatically: the lowest-rank set covering all the taxa you asked for. Taxa under one phylum get that phylum's set, taxa spanning both domains get `Bacteria-and-Archaea`, and anything reaching outside Bacteria and Archaea falls back to `Universal-Hug-et-al`. The set chosen and the reason for it are printed in the run's opening banner. Passing `-H` always overrides this.
 
-# Outputs
+## Outputs
 Each GToTree run creates an output directory to hold all of the output files. This defaults to "gtotree-output", but can be specified with the **`-o`** argument.
 
-### Primary output files
+#### Primary output files
 
-#### Tree
+##### Tree
 * **&lt;output-dir-name&gt;.tre**
   * The final tree file in newick format, midpoint-rooted. Named after the output directory, so `-o alteromonas-tree` produces `alteromonas-tree/alteromonas-tree.tre`.
   * The pre-midpoint-rooted tree is kept in `run-files/`.
@@ -92,13 +94,13 @@ Each GToTree run creates an output directory to hold all of the output files. Th
   * IQ-TREE reports ultrafast bootstrap (UFBoot) support values. Their [help pages](http://www.iqtree.org/doc/Frequently-Asked-Questions) state that values of 95% indicate a 95% probability that clade is true.
   * If run with the `-N` option, no tree will be produced, and only the alignment will be generated.
 
-#### Alignment files
+##### Alignment files
 * **aligned-SCGs.faa** (or `aligned-SCGs.fasta` in nucleotide mode)
   * Alignment file in fasta format.
 * **aligned-SCGs-mod-names.faa**
   * Produced if labels were modified – i.e. if a mapping file was given (`-m`) or taxonomy was added (`-t` or `-D`).
 
-#### Genomes summary info
+##### Genomes summary info
 * **genomes-summary-info.tsv**
   * A tab-delimited table of summary information for each genome:
 
@@ -118,15 +120,15 @@ Each GToTree run creates an output directory to hold all of the output files. Th
 
 > If target Pfams (`-p`) or KOs (`-K`) were searched, `pfam_search_completed` / `ko_search_completed` columns are added. If taxonomy was added (`-t` or `-D`), a column per taxonomic rank is added.
 
-#### Citations
+##### Citations
 * **citations.txt**
-  * Citation information for every program actually used in that specific run, with versions. See [below](user-guide#citation-information).
+  * Citation information for every program actually used in that specific run, with versions. See [below](user-guide.md#citation-information).
 
-#### Log
+##### Log
 * **gtotree-runlog.txt**
   * A record of what was printed to the screen during the run.
 
-### Report output files
+#### Report output files
 These live in the output sub-directory `run-files/`.
 
 **removed-genomes.tsv**
@@ -147,29 +149,29 @@ These live in the output sub-directory `run-files/`.
 
 ---
 
-## Optional arguments and parameters
+### Optional arguments and parameters
 The condensed help menu can be viewed by running `gtotree -h`, and the detailed one, with full descriptions of every parameter, with `gtotree -s`.
 
 ---
 
-### Output directory
+#### Output directory
 * **[-o \<str\>] default: gtotree-output**
 
 GToTree writes all output files to an output directory. By default this is "gtotree-output", but you can specify it by passing an argument to the **`-o`** flag. (E.g.: `-o alteromonas-output`)
 
 ---
 
-### Overwrite an existing output directory
+#### Overwrite an existing output directory
 * **[-F ] default: false**
 
 By default GToTree won't write into an output directory that already exists. Provide **`-F`**/`--force-overwrite` to delete and recreate it.
 
 ---
 
-### Specify desired genome labels
+#### Specify desired genome labels
 * **[-m \<file\>] specify desired genome labels**
 
-Often it is helpful to have specific labels for specific genomes in a tree (as exemplified in the [Alteromonas example](https://github.com/AstrobioMike/GToTree/wiki/example-usage#mapping-file-for-labeling-specific-genomes)). GToTree adds lineage information to genomes that have it if we specify we want NCBI taxonomies added (with the `-t` flag) or GTDB taxonomy (with the `-D` flag). We can also swap labels of specific genomes we know we care about and want to be able to find more easily, or just append certain information to the label.
+Often it is helpful to have specific labels for specific genomes in a tree (as exemplified in the [Alteromonas example](example-usage.md#mapping-file-for-labeling-specific-genomes)). GToTree adds lineage information to genomes that have it if we specify we want NCBI taxonomies added (with the `-t` flag) or GTDB taxonomy (with the `-D` flag). We can also swap labels of specific genomes we know we care about and want to be able to find more easily, or just append certain information to the label.
 
 Either or both of these can be done by providing a mapping file to the **`-m`** argument. It should be a 2- or 3-column tab-delimited file that has the initial genome ID in the first column (this will be either the NCBI accession or the file name, depending on how the input genome was provided). The second column may or may not be empty. If we want to specify the complete label ourselves for that genome, then we should put that new label in column 2. If we don't want to specify the complete label, leave column 2 empty. Column 3 may or may not be empty. If we'd like to append something to the label (whether that's the initial label, the modified lineage label, or the label we may have specified in column 2), then add that text to column 3. If there is nothing we want to append, we should leave column 3 empty.
 
@@ -177,7 +179,7 @@ Either or both of these can be done by providing a mapping file to the **`-m`** 
 
 ---
 
-### Specify to add NCBI lineage info to genome labels
+#### Specify to add NCBI lineage info to genome labels
 * **[-t ] default: false**
 
 By setting the **`-t`** flag, GToTree will look up NCBI lineage information for any genomes that have an associated taxid and add it to the genome labels – making the output tree much more useful than just a collection of odd identifiers. Which specific taxonomic ranks get added can be specified with the **`-L`** argument.
@@ -186,7 +188,7 @@ By setting the **`-t`** flag, GToTree will look up NCBI lineage information for 
 
 ---
 
-### Specify to add [GTDB](https://gtdb.ecogenomic.org/) lineage info to genome labels
+#### Specify to add [GTDB](https://gtdb.ecogenomic.org/) lineage info to genome labels
 * **[-D ] default: false**
 
 By setting the **`-D`** flag, GToTree will add GTDB taxonomy information to the labels that appear in the final alignment and in the tree. Which specific taxonomic ranks get added can be specified with the **`-L`** argument. If a given accession isn't present in GTDB, the NCBI lineage info will be used (and "_NCBI" will be appended to it).
@@ -195,21 +197,21 @@ By setting the **`-D`** flag, GToTree will add GTDB taxonomy information to the 
 
 ---
 
-### Specify which taxonomic ranks to add to genome labels
+#### Specify which taxonomic ranks to add to genome labels
 * **[-L \<str\>] default: domain,phylum,class,order,family,genus,species**
 
 Provide the **`-t`** or **`-D`** flag in order to add lineage info to the genome labels. By default this adds domain, phylum, class, genus, and species, where available. This may be suitable when making a tree across multiple domains, but may be unnecessarily cumbersome when just making a tree of one genus. You can specify which ranks you'd like added with the **`-L`** argument as a comma-separated list, e.g. `-L genus,species`.
 
 ---
 
-### Filtering gene-hits by length
+#### Filtering gene-hits by length
 * **[-c \<float\>] default: 0.2**
 
-When scanning many genomes for many genes, it becomes harder or completely impractical to visually inspect alignments of everything. One way to try to filter out potential spurious gene hits is to filter by some expected length. The **`-c`** parameter uses the median length of each particular gene-set to calculate an upper- and lower-length threshold to filter out potentially spurious genes. It takes a float between 0-1 specifying the range about the median of sequences to be retained. For example, under the default setting, if the median length of a set of sequences is 100 AAs, those genes with sequences longer than 120 or shorter than 80 will be filtered out before alignment of that gene set. This becomes less useful when using very few genomes however (see [note here](https://github.com/AstrobioMike/GToTree/wiki/things-to-consider#filtering-hits-by-gene-length)).
+When scanning many genomes for many genes, it becomes harder or completely impractical to visually inspect alignments of everything. One way to try to filter out potential spurious gene hits is to filter by some expected length. The **`-c`** parameter uses the median length of each particular gene-set to calculate an upper- and lower-length threshold to filter out potentially spurious genes. It takes a float between 0-1 specifying the range about the median of sequences to be retained. For example, under the default setting, if the median length of a set of sequences is 100 AAs, those genes with sequences longer than 120 or shorter than 80 will be filtered out before alignment of that gene set. This becomes less useful when using very few genomes however (see [note here](things-to-consider.md#filtering-hits-by-gene-length)).
 
 ---
 
-### Filtering genes by how many genomes have them
+#### Filtering genes by how many genomes have them
 * **[-r \<float\>] default: 0.1**
 
 New in v2. The **`-r`** parameter sets the minimum proportion of genomes that must have a hit to a target gene for that gene to be retained. It takes a float between 0-1. For example, with 100 input genomes and the default of 0.1, a target gene with hits in only 9 of them would be dropped from the analysis.
@@ -218,23 +220,23 @@ This is calculated on the genomes remaining after processing but *before* genome
 
 ---
 
-### Filtering genomes based on hits to target genes
+#### Filtering genomes based on hits to target genes
 * **[-G \<float\>] default: 0.5**
 
-The **`-G`** parameter allows you to filter out genomes that have too few hits to the target genes. It takes a float between 0-1 specifying the minimum fraction of hits a genome must have of the SCG-set. For example, under the default setting, if 100 target genes will make up the final tree, and genome X only has hits to 49 of them, it will be removed from analysis. How you want this set may depend on the breadth of diversity of the tree you are making (see [note here](https://github.com/AstrobioMike/GToTree/wiki/things-to-consider#filtering-genomes-by-fraction-of-hits-to-targets)).
+The **`-G`** parameter allows you to filter out genomes that have too few hits to the target genes. It takes a float between 0-1 specifying the minimum fraction of hits a genome must have of the SCG-set. For example, under the default setting, if 100 target genes will make up the final tree, and genome X only has hits to 49 of them, it will be removed from analysis. How you want this set may depend on the breadth of diversity of the tree you are making (see [note here](things-to-consider.md#filtering-genomes-by-fraction-of-hits-to-targets)).
 
 > **Changed in v2:** this is now calculated against the number of target genes that will actually contribute to the final tree (i.e. after `-r` filtering), rather than against the starting total. So if you start with 100 target genes and 20 are dropped by `-r`, the fraction is taken against 80.
 
 ---
 
-### Best-hit mode
+#### Best-hit mode
 * **[-B ] default: false**
 
-Provide the **`-B`** flag with no arguments if you'd like to run GToTree in "best-hit" mode. By default, if a target gene has more than one hit in a given genome, GToTree won't include a sequence for that target gene from that genome in the final alignment. With this flag provided, GToTree will take the best hit and incorporate it into the alignment, even if that genome has more than one hit to the target gene. See [here](https://github.com/AstrobioMike/GToTree/wiki/Things-to-consider#best-hit-mode) for more discussion on this.
+Provide the **`-B`** flag with no arguments if you'd like to run GToTree in "best-hit" mode. By default, if a target gene has more than one hit in a given genome, GToTree won't include a sequence for that target gene from that genome in the final alignment. With this flag provided, GToTree will take the best hit and incorporate it into the alignment, even if that genome has more than one hit to the target gene. See [here](things-to-consider.md#best-hit-mode) for more discussion on this.
 
 ---
 
-### Searching for additional target genes
+#### Searching for additional target genes
 * **[-p \<file\>] target Pfams**
 * **[-K \<file\>] target KOs**
 
@@ -244,7 +246,7 @@ Single-column files of Pfam accessions (e.g. `PF00789`) or KO IDs (e.g. `K01601`
 
 ---
 
-### Number of jobs to run in parallel where possible
+#### Number of jobs to run in parallel where possible
 * **[-j \<int\>] default: 4**
 
 This determines how many jobs to run in parallel during steps that are parallelizable – such as the processing/searching of each individual genome, the filtering of genes and genomes, and alignment of each individual gene-set.
@@ -253,63 +255,63 @@ This determines how many jobs to run in parallel during steps that are paralleli
 
 ---
 
-### Number of threads passed to muscle
+#### Number of threads passed to muscle
 * **[-M \<int\>] default: 5**
 
 How many threads each individual muscle alignment job is given.
 
 ---
 
-### Overriding the super5 alignment algorithm
+#### Overriding the super5 alignment algorithm
 * **[-X ] default: false**
 
-GToTree uses muscle's [super5](https://drive5.com/muscle5/manual/super5_algo.html) algorithm by default to keep alignment times reasonable. Provide **`-X`** to use the regular [PPP](https://drive5.com/muscle5/manual/ppp_algo.html) algorithm instead – see [here](https://github.com/AstrobioMike/GToTree/wiki/things-to-consider#working-with-many-genomes) for more.
+GToTree uses muscle's [super5](https://drive5.com/muscle5/manual/super5_algo.html) algorithm by default to keep alignment times reasonable. Provide **`-X`** to use the regular [PPP](https://drive5.com/muscle5/manual/ppp_algo.html) algorithm instead – see [here](things-to-consider.md#working-with-many-genomes) for more.
 
 ---
 
-### Choosing the treeing program
+#### Choosing the treeing program
 * **[-T \<str\>] default: VeryFastTree**
 
 Which program builds the tree. Options are `FastTree`, `FastTreeMP`, `VeryFastTree`, and `IQTREE`. [VeryFastTree](https://github.com/citiususc/veryfasttree) is a faster, parallelized reimplementation of FastTree's algorithm; in testing it gave the same trees as FastTreeMP in about a third of the time.
 
 ---
 
-### Skipping the tree
+#### Skipping the tree
 * **[-N ] default: false**
 
 Provide **`-N`** to stop after producing the alignment, without building a tree.
 
 ---
 
-### Keeping individual gene alignments
+#### Keeping individual gene alignments
 * **[-k ] default: false**
 
 Provide **`-k`** to keep the individual per-gene alignments rather than only the concatenated one.
 
 ---
 
-### Keep working directory
+#### Keep working directory
 * **[-d ] default: false**
 
 Provide the **`-d`** flag with no arguments if you'd like to keep the working directory that is used during the run. This is mostly useful for debugging purposes.
 
 ---
 
-### Temporary directory location
+#### Temporary directory location
 * **[--tmp-dir \<path\>] default: &lt;output-dir&gt;/gtt-tmp-\***
 
 Where the temporary working directory is created, if you need it somewhere other than inside the output directory (e.g. on a faster or larger disk).
 
 ---
 
-### Generate nucleotide alignment and tree
+#### Generate nucleotide alignment and tree
 * **[-z ] default: false**
 
 Provide the **`-z`** flag with no arguments if you'd like to make the alignment and tree based on nucleotide sequences instead of amino-acids (which can provide greater resolution on closely related input genomes). Note this mode can only accept NCBI accessions (passed to `-a`) and genome fasta files (passed to `-f`) as input sources (since we can't confidently reverse-translate amino-acid seqs). GToTree still finds the target genes based on amino-acid HMM searches.
 
 ---
 
-# Resuming an interrupted run
+## Resuming an interrupted run
 
 New in v2. If a run is interrupted – a walltime limit, a dropped connection partway through downloading genomes, a killed process – you can pick it back up by re-running the same command with **`-R`**/`--resume` added:
 
@@ -323,34 +325,34 @@ GToTree fingerprints the inputs and settings of each run. On a resume, if anythi
 
 ---
 
-# Options set for programs run
+## Options set for programs run
 > **NOTE**  
 > In order to give conda more freedom in managing its environments, specific versions have been removed from the conda installation. If you installed with conda, and want to know the specific versions, you can check in the environment with `conda list`.
 
-## prodigal
+### prodigal
 [Prodigal](https://github.com/hyattpd/Prodigal) is run with default settings other than setting the `-c` flag, which means only include complete genes (and `-q` to quiet its output).
 
-## HMM searching
+### HMM searching
 HMM searches are performed in-process with [pyhmmer](https://pyhmmer.readthedocs.io/), rather than by shelling out to `hmmsearch`. The searches use the gathering thresholds (`--cut_ga`-equivalent) stored in the HMM profiles being used for cutoff values, as before. GToTree will exit up front if a provided HMM file has profiles lacking gathering thresholds.
 
-## muscle
-[Muscle](https://www.drive5.com/muscle/downloads.htm) is run with default settings using the [`-super5` algorithm](https://drive5.com/muscle5/manual/super5_algo.html). The [`-align` PPP algorithm](https://drive5.com/muscle5/manual/ppp_algo.html) can be used instead by adding `-X` to the GToTree call – see [here](https://github.com/AstrobioMike/GToTree/wiki/things-to-consider#working-with-many-genomes) for more on this. The number of threads given to each alignment job is set with `-M` (default 5).
+### muscle
+[Muscle](https://www.drive5.com/muscle/downloads.htm) is run with default settings using the [`-super5` algorithm](https://drive5.com/muscle5/manual/super5_algo.html). The [`-align` PPP algorithm](https://drive5.com/muscle5/manual/ppp_algo.html) can be used instead by adding `-X` to the GToTree call – see [here](things-to-consider.md#working-with-many-genomes) for more on this. The number of threads given to each alignment job is set with `-M` (default 5).
 
-## trimal
+### trimal
 [Trimal](http://trimal.cgenomics.org/downloads) is run with default settings other than setting the `-automated1` flag, which performs "a heuristic selection of the automatic method based on similarity statistics. (Optimized for Maximum Likelihood phylogenetic tree reconstruction)."
 
-## FastTree
+### FastTree
 [FastTree](http://www.microbesonline.org/fasttree/) and FastTreeMP are run with default settings for amino-acid alignments, and with the flags `-nt` and `-gtr` for nucleotide alignments. FastTreeMP is given `OMP_NUM_THREADS` matching `-j`.
 
-## VeryFastTree
+### VeryFastTree
 [VeryFastTree](https://github.com/citiususc/veryfasttree) is run with `-threads` matching `-j`, and with `-nt -gtr` for nucleotide alignments.
 
-## IQ-TREE
+### IQ-TREE
 [IQ-TREE](http://www.iqtree.org/) is run with `-nt` matching `-j`, `-m MFP` for model selection, and `-B 1000` for ultrafast bootstraps. Bootstrapping is skipped with fewer than 4 genomes, as IQ-TREE requires at least that many.
 
 ---
 
-# Citation information
+## Citation information
 
 GToTree relies on many great programs. Along with all other outputs, it will generate a `citations.txt` file with citation information specific for every run that accounts for all programs it relies upon. Please be sure to cite the developers appropriately :)
 

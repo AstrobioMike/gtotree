@@ -11,3 +11,7 @@ htmlcov/
 .pytest_cache/
 tmp-testing*
 scg-set-builds/
+
+# docs site build (docs/build-site.sh)
+.site-src/
+site/

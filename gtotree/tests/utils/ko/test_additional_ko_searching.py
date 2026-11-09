@@ -321,7 +321,12 @@ class TestWriteOutFailedKoTargets:
 class TestWriteKoCountsTable:
 
     def _run_data(self, tmp_path, genomes, targets):
-        """genomes: list of (id, num_genes, ko_search_done, removed, {ko: n_hits})."""
+        """genomes: list of (id, num_genes, ko_search_done, removed, {ko: n_hits}).
+
+        `removed` stands in for a genome the run dropped after its KO search ran (an
+        SCG-search failure, `-G`); a failed KO search is `ko_search_failed` on the
+        namespace, set by the test that needs one.
+        """
         results_root = tmp_path / "individual-genome-results"
         gds = []
         for gid, num_genes, done, removed, hits in genomes:
@@ -332,7 +337,8 @@ class TestWriteKoCountsTable:
                 lines += [f"{gid}_gene{i}\t{ko_id}" for i in range(n)]
             (d / "kofamscan-results.tsv").write_text("\n".join(lines) + "\n")
             gds.append(types.SimpleNamespace(id=gid, num_genes=num_genes,
-                                             ko_search_done=done, removed=removed))
+                                             ko_search_done=done, ko_search_failed=False,
+                                             removed=removed))
         return types.SimpleNamespace(all_input_genomes=gds,
                                      found_ko_targets=targets,
                                      ko_results_dir=str(tmp_path))
@@ -369,15 +375,30 @@ class TestWriteKoCountsTable:
 
         assert [r[0] for r in self._table(tmp_path)[1:]] == ["G1", "G2"]
 
-    def test_removed_and_unsearched_genomes_are_left_out(self, tmp_path):
+    def test_unsearched_and_failed_genomes_are_left_out(self, tmp_path):
         rd = self._run_data(tmp_path, [("G1", 5, True, False, {"K00001": 1}),
-                                       ("G2", 5, True, True, {"K00001": 1}),
+                                       ("G2", 5, True, False, {"K00001": 1}),
                                        ("G3", 5, False, False, {"K00001": 1})],
+                            ["K00001"])
+        rd.all_input_genomes[1].ko_search_failed = True
+
+        ko.write_ko_counts_table(rd)
+
+        # a failed search isn't a row of zeros; genomes-summary-info.tsv marks it
+        assert [r[0] for r in self._table(tmp_path)[1:]] == ["G1"]
+
+    def test_a_genome_dropped_after_its_search_ran_keeps_its_row(self, tmp_path):
+        # the table reports the KO search, not tree membership. Filtering on
+        # `removed` made the rows depend on how far the run had gotten when the table
+        # was written: a resume after `-G` rewrote it without the `-G`-dropped genomes
+        rd = self._run_data(tmp_path, [("G1", 5, True, False, {"K00001": 1}),
+                                       ("G2", 5, True, True, {"K00001": 2})],
                             ["K00001"])
 
         ko.write_ko_counts_table(rd)
 
-        assert [r[0] for r in self._table(tmp_path)[1:]] == ["G1"]
+        assert [r[:3] for r in self._table(tmp_path)[1:]] == [["G1", "5", "1"],
+                                                               ["G2", "5", "2"]]
 
     def test_the_tallies_come_back_per_genome(self, tmp_path):
         rd = self._run_data(tmp_path,

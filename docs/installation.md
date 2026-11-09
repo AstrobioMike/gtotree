@@ -1,9 +1,11 @@
-[GToTree](https://github.com/AstrobioMike/GToTree/wiki) runs in a Unix-like command-line environment. This means it will work on Mac and Linux computers in the standard terminal programs available with them. And to use GToTree on a Windows computer, I would recommend installing the [Windows Subsystem for Linux (WSL)](https://docs.microsoft.com/en-us/windows/wsl/install), then when in the WSL terminal, install a Linux version of [miniconda](https://astrobiomike.github.io/unix/conda-intro#getting-and-installing-conda). Then installing with `conda` as shown below will work in the WSL environment 👍 
+# Installation
+
+[GToTree](index.md) runs in a Unix-like command-line environment. This means it will work on Mac and Linux computers in the standard terminal programs available with them. And to use GToTree on a Windows computer, I would recommend installing the [Windows Subsystem for Linux (WSL)](https://docs.microsoft.com/en-us/windows/wsl/install), then when in the WSL terminal, install a Linux version of [miniconda](https://astrobiomike.github.io/unix/conda-intro#getting-and-installing-conda). Then installing with `conda` as shown below will work in the WSL environment 👍
 
 ## Conda quickstart!
-If you don't already have the glorious package manager [conda](https://conda.io/docs/), I **highly** recommend you get it. This really isn't the venue to go into why it's so helpful, but it really is, I promise 🙂 
+If you don't already have the glorious package manager [conda](https://conda.io/docs/), I **highly** recommend you get it. This really isn't the venue to go into why it's so helpful, but it really is, I promise 🙂
 
-To get conda up and running (which is very quick), you can follow the instructions to install miniconda (a light-weight version) for your appropriate system starting from [here](https://conda.io/en/latest/miniconda.html). You will want a python 3.X version, and more than likely a 64-bit version. And if you'd like to learn more about conda sometime, I have [an introduction page here](https://astrobiomike.github.io/unix/conda-intro) 🙂 
+To get conda up and running (which is very quick), you can follow the instructions to install miniconda (a light-weight version) for your appropriate system starting from [here](https://conda.io/en/latest/miniconda.html). You will want a python 3.X version, and more than likely a 64-bit version. And if you'd like to learn more about conda sometime, I have [an introduction page here](https://astrobiomike.github.io/unix/conda-intro) 🙂
 
 ---
 
@@ -93,6 +95,6 @@ Then the new environment can be activated with `conda activate gtotree`.
 ---
 
 ## Versions of utilized programs
-Every GTOtree run produces a citations.txt file that holds the versions and citation info of all primary programs used. That should be the main source of truth for version tracking and citation info for GToTree and the wonderful tools it depends on. 
+Every GTOtree run produces a citations.txt file that holds the versions and citation info of all primary programs used. That should be the main source of truth for version tracking and citation info for GToTree and the wonderful tools it depends on.
 
 You can also check specific versions in your active conda gtotree environment with `conda list`.

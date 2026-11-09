@@ -1,0 +1,39 @@
+# Builds the docs site (docs/build-site.sh, Zensical) and publishes it with GitHub Pages at
+# https://astrobiomike.org/gtotree/ (the user site's custom domain carries over to project sites,
+# so this is the same page as https://astrobiomike.github.io/GToTree/).
+# Turn on with Settings > Pages > Source: "GitHub Actions", then uncomment the push trigger so
+# every change to the docs republishes the site.
+name: docs
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install zensical
+      - run: bash docs/build-site.sh
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

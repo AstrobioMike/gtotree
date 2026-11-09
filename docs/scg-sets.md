@@ -1,3 +1,5 @@
+# Single-copy gene-sets
+
 There are 46 single-copy gene (SCG)-set HMMs packaged with GToTree. 45 of them were
 built from the [GTDB](https://gtdb.ecogenomic.org/) taxonomy (release r232) as described
 below, and one covers all 3 domains (from
@@ -9,9 +11,9 @@ We can view which are available by running **`gtt hmms`**.
 > sets are still available for download — see
 > [The original (v1) SCG-sets](#the-original-v1-scg-sets) below.
 
-# Available SCG-sets
+## Available SCG-sets
 
-### Bacteria
+#### Bacteria
 
 |SCG-set|Rank|Target genes|Genomes used|Dereplicated at|
 |----|:----:|:----:|:----:|:----:|
@@ -52,7 +54,7 @@ We can view which are available by running **`gtt hmms`**.
 |Alphaproteobacteria|class|106|2343|genus|
 |Gammaproteobacteria|class|108|2550|genus|
 
-### Archaea
+#### Archaea
 
 |SCG-set|Rank|Target genes|Genomes used|Dereplicated at|
 |----|:----:|:----:|:----:|:----:|
@@ -65,7 +67,7 @@ We can view which are available by running **`gtt hmms`**.
 |Thermoplasmatota|phylum|93|180|genus|
 |Thermoproteota|phylum|74|338|genus|
 
-### Spanning more than one domain
+#### Spanning more than one domain
 
 |SCG-set|Scope|Target genes|Source|
 |----|:----:|:----:|----|
@@ -77,7 +79,7 @@ More information on each — including the specific Pfam accessions in every set
 [here](https://github.com/AstrobioMike/GToTree/blob/master/hmm_sets/hmm-sources-and-info.tsv),
 and in the GToTree installed location (see `gtt hmms`).
 
-# How these were generated
+## How these were generated
 
 All 45 GTDB-based sets were built with `gtt gen-scg-hmms`, the same helper program that
 ships with GToTree for building your own (run `gtt gen-scg-hmms -h`). In outline:
@@ -103,7 +105,7 @@ ships with GToTree for building your own (run `gtt gen-scg-hmms -h`). In outline
 
 Sets were built for each domain, and for taxa with enough genomes to support the above.
 
-## Building your own
+### Building your own
 
 `gtt gen-scg-hmms` does all of the above for any target group. The simplest form takes a
 taxon directly:
@@ -128,7 +130,7 @@ gtt gen-scg-hmms --from-run my-nitrospirota-scgs -p 80 -o my-nitrospirota-scgs-p
 This writes a complete new output directory and leaves the original as it was. The
 parameters each set was selected with are recorded in its `selection-params.tsv`.
 
-# The original (v1) SCG-sets
+## The original (v1) SCG-sets
 
 The sets packaged with GToTree v1 were built in 2018 against NCBI taxonomy and Pfam 32.0.
 They are no longer packaged with GToTree, but they are all still available as assets on

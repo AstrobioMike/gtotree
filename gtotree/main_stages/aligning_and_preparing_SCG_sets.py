@@ -96,6 +96,21 @@ def _scg_paths(scg_id, run_data):
     }
 
 
+def clear_alignment_products(run_data):
+    """
+    Remove every SCG-set's alignment outputs so the align stage redoes them
+
+    For when an upstream stage is being redone on a resume: the worker treats an
+    existing '-final' as "already aligned", which is right after a kill mid-stage but
+    wrong once the sequences feeding it may have changed
+    """
+    for scg in run_data.SCG_targets:
+        paths = _scg_paths(scg.id, run_data)
+        for key in ("aligned", "trimmed", "final"):
+            remove_file_if_exists(paths[key])
+            remove_file_if_exists(paths[key] + ".part")
+
+
 def _align_one_SCG(scg, run_data):
     """
     Worker: align + trim + gap-pad one SCG set. Touches only this SCG's

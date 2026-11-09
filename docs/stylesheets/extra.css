@@ -1,0 +1,61 @@
+/* GToTree docs palette, taken from the overview figure: the indigo of the input chips and
+   step numbers, the teal of the optional/output boxes, and the slate blue-gray of the
+   connecting lines. mkdocs.yml sets primary/accent to "custom" so these take effect. */
+
+:root {
+  --gtt-indigo: #4967ef;
+  --gtt-indigo-dark: #3652c9;
+  --gtt-indigo-light: #8da1f5;
+  --gtt-teal: #0f9d8a;
+  --gtt-teal-dark: #0b7d6e;
+  --gtt-slate: #355b7a;
+  --gtt-slate-light: #7990a8;
+  --gtt-panel: #eff3ff;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--gtt-indigo);
+  --md-primary-fg-color--light: var(--gtt-indigo-light);
+  --md-primary-fg-color--dark: var(--gtt-indigo-dark);
+  --md-primary-bg-color: #ffffff;
+  --md-accent-fg-color: var(--gtt-teal);
+  --md-accent-fg-color--transparent: rgba(15, 157, 138, 0.1);
+  --md-typeset-a-color: var(--gtt-indigo-dark);
+  --md-code-bg-color: var(--gtt-panel);
+  --md-typeset-kbd-color: var(--gtt-panel);
+  --md-footer-bg-color: var(--gtt-slate);
+  --md-footer-bg-color--dark: #2a4860;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--gtt-indigo-dark);
+  --md-primary-fg-color--light: var(--gtt-indigo);
+  --md-primary-fg-color--dark: #2a3f9e;
+  --md-accent-fg-color: #3ea194;
+  --md-accent-fg-color--transparent: rgba(62, 161, 148, 0.15);
+  --md-typeset-a-color: var(--gtt-indigo-light);
+  --md-default-bg-color: #1b2230;
+  --md-default-fg-color: hsla(220, 30%, 92%, 0.87);
+  --md-code-bg-color: #232b3b;
+  --md-footer-bg-color: #141a26;
+  --md-footer-bg-color--dark: #0f141d;
+}
+
+/* blockquotes, which the pages use for notes, get the slate line of the figure */
+.md-typeset blockquote {
+  border-left-color: var(--gtt-slate-light);
+}
+
+/* tables: indigo header text on the panel tint */
+.md-typeset table:not([class]) th {
+  background-color: var(--gtt-panel);
+  color: var(--gtt-indigo-dark);
+}
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background-color: #232b3b;
+  color: var(--gtt-indigo-light);
+}
+
+/* the home-page logo and the overview figure */
+.gtt-logo { display: block; margin: 0 auto 1rem; max-width: 36rem; }
+.gtt-figure { display: block; margin: 1.5rem auto; border-radius: 0.6rem; }

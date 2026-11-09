@@ -693,7 +693,7 @@ def few_genomes_notice(total_input_genomes, args):
     to consider increasing it.
 
     More info can be found here:
-      github.com/AstrobioMike/GToTree/wiki/Things-to-consider
+      astrobiomike.org/gtotree/things-to-consider
 
                    Moving forward with `-c` set to {args.seq_length_cutoff} this run."""
     )
@@ -713,7 +713,7 @@ def absurd_number_of_genomes_notice(total_input_genomes):
     redundancy when working at a broad level with many genomes.
 
     More info on that can be found here:
-      github.com/AstrobioMike/GToTree/wiki/things-to-consider
+      astrobiomike.org/gtotree/things-to-consider
 
     You can consider cancelling this run now with `ctrl + c`, otherwise we will
     continue with our regularly scheduled program 60 seconds after this message

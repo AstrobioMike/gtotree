@@ -20,9 +20,12 @@ from gtotree.utils.misc.messaging import (report_message, color_text, wprint)
 from gtotree.utils.misc.resume_state import invalidate_completed_from
 from gtotree.utils.misc.stages import (GenomeRemovalStage,
                                   GENOME_REMOVAL_STAGE_ORDER,
+                                  GENOME_REMOVALS_MADE_BY_STAGE,
                                   NCBI_REMOVAL_STAGES,
                                   PREPROCESSING_REMOVAL_STAGES,
                                   SCG_REMOVAL_STAGE_ORDER,
+                                  SCG_REMOVALS_MADE_BY_STAGE,
+                                  PipelineStage,
                                   PIPELINE_STAGES,
                                   stages_through,
                                   validate_stage)
@@ -413,6 +416,14 @@ class GenomeData:
         self.reason_removed = reason
         self.final_AA_path = None
 
+    def mark_restored(self):
+        """
+        Put this genome back in the run (a resume is redoing the stage that dropped it)
+        """
+        self.removed_at = None
+        self.reason_removed = None
+        self.num_SCG_hits_after_filtering = None
+
     def mark_prodigal_used(self, value=True):
         self.prodigal_used = value
 
@@ -473,6 +484,11 @@ class SCGset:
         self.removed_at = stage
         self.reason_removed = reason
         self.remaining = False
+
+    def mark_restored(self):
+        self.removed_at = None
+        self.reason_removed = None
+        self.remaining = True
 
 
 @dataclass
@@ -579,10 +595,52 @@ class RunData:
         Forget `stage` and everything downstream of it
 
         Anything computed from a stage's output stops being trustworthy the moment that
-        stage has to be redone, even if it was marked complete
+        stage has to be redone, even if it was marked complete. That includes the
+        removals those stages made: a genome `-G` dropped, or an SCG-set `-r` dropped,
+        was judged against the run as it stood then, and gets judged again when the
+        stage reruns. Without this, a resume that had to regenerate some per-genome
+        results kept the old `-G` removals while re-filtering with a changed denominator
         """
         validate_stage(stage, PIPELINE_STAGES, "pipeline stage")
         invalidate_completed_from(self.completed_stages, stage, PIPELINE_STAGES)
+
+        invalidated = PIPELINE_STAGES[PIPELINE_STAGES.index(stage):]
+        self._restore_removals_made_by(invalidated)
+        self._reset_derived_state_of(invalidated)
+
+    def _restore_removals_made_by(self, pipeline_stages):
+        genome_stages = frozenset(s for ps in pipeline_stages
+                                  for s in GENOME_REMOVALS_MADE_BY_STAGE.get(ps, ()))
+        scg_stages = frozenset(s for ps in pipeline_stages
+                               for s in SCG_REMOVALS_MADE_BY_STAGE.get(ps, ()))
+        for name in GENOME_SOURCE_FIELDS:
+            for gd in getattr(self, name):
+                if gd.removed_at in genome_stages:
+                    gd.mark_restored()
+        for scg in self.SCG_targets:
+            if scg.removed_at in scg_stages:
+                scg.mark_restored()
+
+    def _reset_derived_state_of(self, pipeline_stages):
+        """
+        Clear the per-SCG/per-genome flags the invalidated stages use to skip work, so
+        they do it again instead of trusting numbers from the old state
+        """
+        stages = frozenset(pipeline_stages)
+        for scg in self.SCG_targets:
+            if PipelineStage.FILTER_GENES in stages:
+                scg.gene_length_filtered = False
+                scg.num_genomes_after_length_filtering = 0
+            if PipelineStage.FILTER_GENOMES in stages:
+                scg.num_genomes_after_genome_filtering = None
+            if PipelineStage.ALIGN_SCG_SETS in stages:
+                scg.aligned = None
+                scg.trimmed = None
+                scg.ready_for_cat = None
+        if PipelineStage.FILTER_GENES in stages:
+            for name in GENOME_SOURCE_FIELDS:
+                for gd in getattr(self, name):
+                    gd.num_SCG_hits_after_filtering = None
 
     # --- stage-scoped removals ------------------------------------------------
 

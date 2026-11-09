@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-This is a helper program of GToTree (https://github.com/AstrobioMike/GToTree/wiki)
+This is a helper program of GToTree (https://astrobiomike.org/gtotree/)
 for setting up the NCBI assembly-info table if it is not present.
 
 GToTree uses bit's hosted, pre-built NCBI Parquet asset (ncbi-data.parquet),

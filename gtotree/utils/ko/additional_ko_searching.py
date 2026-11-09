@@ -89,8 +89,9 @@ def write_ko_counts_table(run_data):
     """
     Write ko-hit-counts.tsv from the per-genome result files
     """
+    # see write_pfam_counts_table for why this isn't filtered on `removed`
     genomes = [gd for gd in run_data.all_input_genomes
-               if gd.ko_search_done and not gd.removed]
+               if gd.ko_search_done and not gd.ko_search_failed]
 
     count_rows = []
     hit_tallies = {}
