@@ -1,5 +1,6 @@
 
-<img align="right" width="600" src="https://github.com/AstrobioMike/AstrobioMike.github.io/blob/master/images/GToTree-logo-1200px.png">  
+<!-- <img align="right" width="600" src="https://github.com/AstrobioMike/gtotree/images/gtotree-logo.png">   -->
+<img align="right" width="600" src="images/gtotree-logo.png">  
 
 <br>
 <br>

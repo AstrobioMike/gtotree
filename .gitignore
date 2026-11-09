@@ -6,3 +6,5 @@ gtotree/
 .coverage
 __pycache__
 tmp-testing
+.site-src/
+site/
