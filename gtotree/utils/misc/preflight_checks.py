@@ -349,8 +349,8 @@ def module_check(module, purpose):
     except ImportError as e:
         report_message(f"The python package `{module}` is needed for {purpose}, but it can't be "
                        f"imported in this environment ({type(e).__name__}: {e}). It's a GToTree "
-                       f"dependency and should have been installed alongside it, e.g. with "
-                       f"`conda install -c bioconda {module}`.")
+                       f"dependency and should have been installed alongside it, so something else may be wrong, "
+                       f"but you can try to fix this by running `conda install -c bioconda {module}`.")
         report_very_early_exit(None, color = "yellow")
 
 
